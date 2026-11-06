@@ -1,7 +1,5 @@
 // BG3WASD for the native Linux build of Baldur's Gate 3, loaded with LD_PRELOAD.
-//
-// Prototype scope: direct WASD character movement (unlock + movement input override) and the
-// movement hotkeys. See linux/README.md.
+// What is ported and what isn't: see linux/README.md.
 #include <dlfcn.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -341,7 +339,7 @@ __attribute__((constructor)) void OnLibraryLoad()
     }
     const std::string dir = LibraryDirectory();
     log::Open(LogPath().c_str());
-    LOG_INFO("BG3WASD Linux prototype %s, pid %d", BG3WASD_VERSION, static_cast<int>(getpid()));
+    LOG_INFO("BG3WASD for Linux %s, pid %d", BG3WASD_VERSION, static_cast<int>(getpid()));
 
     SetSettingsPath(dir + "/BG3WASD.toml");
     ReloadSettings();

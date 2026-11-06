@@ -1,4 +1,4 @@
-# BG3WASD for native Linux (prototype)
+# BG3WASD for native Linux
 
 An `LD_PRELOAD` library for the native Linux build of Baldur's Gate 3. Steam runs that build inside
 the Steam Linux Runtime 3.0 (sniper) container. The Windows mod is a DLL for `bg3.exe` and cannot
@@ -57,7 +57,7 @@ an error and stays inactive.
   - `ToggleCameraRotation` (mouselook without holding a button);
   - automatically turning rotation off in menus, dialogs, the loot window and photo mode;
   - the crosshair icon for `centered`.
-- Hotkeys also fire in menus and text fields.
+- Hotkeys still work while menus are open. They are ignored only while you type into a text field.
 - No interact-move blocker and no unclickable active character.
 
 ## Known issues

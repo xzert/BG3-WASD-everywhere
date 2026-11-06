@@ -237,6 +237,14 @@ void OnKey(const Key& key, bool down)
     }
 }
 
+// The game starts and stops SDL text input itself, so this is true while a text field has focus.
+bool TextInputActive()
+{
+    using IsTextInputActiveFn = int (*)();
+    static const auto fn = reinterpret_cast<IsTextInputActiveFn>(dlsym(RTLD_NEXT, "SDL_IsTextInputActive"));
+    return fn && fn();
+}
+
 void OnSdlEvent(const void* event)
 {
     const auto* raw = static_cast<const uint8_t*>(event);
@@ -256,7 +264,11 @@ void OnSdlEvent(const void* event)
             return;  // auto-repeat
         }
         camera::OnInputEvent(false, scancode, down);
-        OnKey({ Key::Scancode, scancode }, down);
+        // Typing into a text field (a save name, chat) must not toggle modes or autoforward.
+        // Releases still count, so a held key can't get stuck.
+        if (!down || !TextInputActive()) {
+            OnKey({ Key::Scancode, scancode }, down);
+        }
     } else if (type == kMouseButtonDown || type == kMouseButtonUp) {
         const uint8_t button = raw[kMouseButtonOffset];
         if (button >= 8) {
