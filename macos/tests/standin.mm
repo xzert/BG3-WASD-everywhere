@@ -58,16 +58,23 @@ public:
 
 namespace {
 
-struct Vector2 {
-    float x, y;
+struct Vector3 {
+    float x, y, z;
 };
 
+// What reached the game's sendEvent:, after the library.
+struct Received {
+    NSEventType type;
+    unsigned short key;
+    NSEventModifierFlags modifiers;
+};
+Received g_received[32];
 int g_events = 0;
 
-// Returned in s0/s1.
-Vector2 GetRotatedInput(short player, bool flag)
+// Returned in s0-s2, like the game's.
+Vector3 GetRotatedInput(short player, bool flag)
 {
-    return { float(player) + 0.5f, flag ? 1.0f : -1.0f };
+    return { float(player) + 0.5f, flag ? 1.0f : -1.0f, 0.25f };
 }
 
 }  // namespace
@@ -99,7 +106,10 @@ void gui::GameUI::OnIsGameMenuOpenChanged(short, bool) {}
 // Doesn't call NSApplication: over SSH there is no window server session to talk to.
 - (void)sendEvent:(NSEvent*)event
 {
-    (void)event;
+    if (g_events < 32) {
+        g_received[g_events] = { event.type, event.keyCode,
+            event.modifierFlags & (NSEventModifierFlagShift | NSEventModifierFlagCapsLock) };
+    }
     ++g_events;
 }
 @end
@@ -111,25 +121,39 @@ int main()
 
         ecl::CameraSystem* camera = new ecl::CameraSystem;
         const ecs::EntityRef entity{ 7 };
-        for (uint32_t id : { 99u, 100u, 101u, 102u, 5u }) {
-            const ls::InputEvent event{ id, 2, 1.0f };
-            const ecl::InputResult result = camera->OnInputEvent(entity, event);
-            if (result.entity != 7 || result.id != id || result.device != 2 || result.check != 7000 + id) {
-                std::printf("OnInputEvent(%u) returned %llu %llu %llu %llu\n", id, (unsigned long long)result.entity,
-                    (unsigned long long)result.id, (unsigned long long)result.device,
-                    (unsigned long long)result.check);
-                ++failures;
+        // In Character mode, the library's default, the camera movement actions (99-102) reach the
+        // camera with id 0.
+        auto check_camera = [&](bool character_mode) {
+            for (uint32_t id : { 99u, 100u, 101u, 102u, 5u }) {
+                ls::InputEvent event{ id, 2, 1.0f };
+                const ecl::InputResult result = camera->OnInputEvent(entity, event);
+                const uint64_t expected = character_mode && id >= 99 && id <= 102 ? 0 : id;
+                if (result.entity != 7 || result.id != expected || result.device != 2 ||
+                    result.check != 7000 + expected) {
+                    std::printf("%s mode: OnInputEvent(%u) returned %llu %llu %llu %llu\n",
+                        character_mode ? "Character" : "Camera", id, (unsigned long long)result.entity,
+                        (unsigned long long)result.id, (unsigned long long)result.device,
+                        (unsigned long long)result.check);
+                    ++failures;
+                }
             }
-        }
-
-        for (short player = 0; player < 3; ++player) {
-            const bool flag = player != 1;
-            const Vector2 value = GetRotatedInput(player, flag);
-            if (value.x != float(player) + 0.5f || value.y != (flag ? 1.0f : -1.0f)) {
-                std::printf("GetRotatedInput(%d) returned %f %f\n", player, value.x, value.y);
-                ++failures;
+        };
+        // GetRotatedInput is inline-hooked: in Camera mode it returns no movement.
+        auto check_movement = [&](bool character_mode) {
+            for (short player = 0; player < 3; ++player) {
+                const bool flag = player != 1;
+                const Vector3 value = GetRotatedInput(player, flag);
+                const Vector3 expected = character_mode ? Vector3{ float(player) + 0.5f, flag ? 1.0f : -1.0f, 0.25f }
+                                                        : Vector3{ 0.0f, 0.0f, 0.0f };
+                if (value.x != expected.x || value.y != expected.y || value.z != expected.z) {
+                    std::printf("%s mode: GetRotatedInput(%d) returned %f %f %f\n",
+                        character_mode ? "Character" : "Camera", player, value.x, value.y, value.z);
+                    ++failures;
+                }
             }
-        }
+        };
+        check_camera(true);
+        check_movement(true);
 
         const ls::InputManager input;
         const unsigned id = 0xA0;
@@ -144,7 +168,51 @@ int main()
                      charactersIgnoringModifiers:@"w" isARepeat:NO keyCode:13];
         BG3Application* application = [BG3Application alloc];
         [application sendEvent:key];
-        if (g_events != 1) {
+
+        // Caps Lock on, then off: each change switches the movement mode.
+        for (NSEventModifierFlags flags : { NSEventModifierFlags(NSEventModifierFlagCapsLock), NSEventModifierFlags(0) }) {
+            NSEvent* caps_lock = [NSEvent keyEventWithType:NSEventTypeFlagsChanged location:NSZeroPoint
+                                             modifierFlags:flags timestamp:0 windowNumber:0 context:nil
+                                                characters:@"" charactersIgnoringModifiers:@"" isARepeat:NO
+                                                   keyCode:57];
+            [application sendEvent:caps_lock];
+            check_camera(flags == 0);
+            check_movement(flags == 0);
+        }
+        // Shift+W toggles autoforward: the game gets a Forward key-down of the library's instead, and
+        // neither the press nor its repeat and release. Backward ends autoforward: the game gets the
+        // library's Forward key-up, then Backward itself.
+        auto send = [&](NSEventType type, unsigned short key, NSEventModifierFlags flags, BOOL repeat) {
+            NSString* text = key == 13 ? @"w" : @"s";
+            [application sendEvent:[NSEvent keyEventWithType:type location:NSZeroPoint modifierFlags:flags
+                                                    timestamp:0 windowNumber:0 context:nil characters:text
+                                  charactersIgnoringModifiers:text isARepeat:repeat keyCode:key]];
+        };
+        const int before = g_events;
+        send(NSEventTypeKeyDown, 13, NSEventModifierFlagShift, NO);
+        send(NSEventTypeKeyDown, 13, NSEventModifierFlagShift, YES);
+        send(NSEventTypeKeyUp, 13, NSEventModifierFlagShift, NO);
+        send(NSEventTypeKeyDown, 1, 0, NO);
+        send(NSEventTypeKeyUp, 1, 0, NO);
+        const Received expected[] = { { NSEventTypeKeyDown, 13, 0 }, { NSEventTypeKeyUp, 13, 0 },
+            { NSEventTypeKeyDown, 1, 0 }, { NSEventTypeKeyUp, 1, 0 } };
+        const int count = int(sizeof expected / sizeof expected[0]);
+        bool autoforward_ok = g_events - before == count;
+        for (int i = 0; autoforward_ok && i < count; ++i) {
+            const Received& got = g_received[before + i];
+            autoforward_ok = got.type == expected[i].type && got.key == expected[i].key &&
+                got.modifiers == expected[i].modifiers;
+        }
+        if (!autoforward_ok) {
+            std::printf("autoforward: the game got %d events:", g_events - before);
+            for (int i = before; i < g_events && i < 32; ++i) {
+                std::printf(" type %lu key %u flags %#lx;", (unsigned long)g_received[i].type, g_received[i].key,
+                    (unsigned long)g_received[i].modifiers);
+            }
+            std::printf("\n");
+            ++failures;
+        }
+        if (g_events != 3 + count) {
             std::printf("sendEvent: reached the application %d times\n", g_events);
             ++failures;
         }

@@ -1,12 +1,7 @@
 #!/bin/sh
-# Starts Baldur's Gate 3 with the probe preloaded. Run it from Terminal while Steam is running:
-#
-#   ./run-game.sh                 # the probe without patching game code
-#   ./run-game.sh --code-probe    # also patch game code (BG3_WASD_CODE_PROBE=1)
-#
-# Steam for macOS can't set environment variables from the launch options: it opens the whole line
-# as one file and fails with "OS Error 260". So the game is started here instead, and Steam's launch
-# options must stay empty. BG3_APP overrides where the game is.
+# Starts Baldur's Gate 3 with the library preloaded, from Terminal while Steam is running. Usually
+# Steam does this through build/bg3-wasd-everywhere-launch in the game's launch options (see
+# README.md); this script is the way without them. BG3_APP overrides where the game is.
 set -eu
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -19,11 +14,8 @@ fi
 log="$HOME/Library/Logs/bg3-wasd-everywhere/bg3-wasd-everywhere.log"
 
 if [ ! -f "$library" ]; then
-    echo "Build the probe first: make -C \"$here\"" >&2
+    echo "Build the library first: make -C \"$here\"" >&2
     exit 1
-fi
-if [ "${1:-}" = "--code-probe" ]; then
-    export BG3_WASD_CODE_PROBE=1
 fi
 
 rm -f "$log"

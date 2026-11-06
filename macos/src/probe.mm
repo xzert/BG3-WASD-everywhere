@@ -1,20 +1,24 @@
 // Prototype of BG3 WASD Everywhere for the native macOS game on Apple Silicon.
 //
-// It does what the first Linux prototype did:
+// What it does so far:
 // - The movement keys move the character. Like WASDUnlockPatch on Windows, it removes the check that
 //   keeps the gamepad movement task (ecl::CharacterTask_MoveController) for gamepads.
 // - It binds the movement keys in inputconfig_p1.json, like InputconfigPatcher on Windows.
+// - Shift+W toggles autoforward in Character mode; Forward or Backward ends it, as in the Linux port.
+// - Caps Lock switches between Character and Camera movement mode, as in the Linux port. In Character
+//   mode the movement keys don't pan the camera. In Camera mode they only pan it: the movement input
+//   that ecl::CharacterTask_MoveController gets (GetRotatedInput, inline-hooked) is zero.
 //
 // It also keeps the probes of the first macOS build, which only log:
 // - The library loads into the game (DYLD_INSERT_LIBRARIES) and finds game functions by name.
 // - A vtable slot can be redirected: ecl::CameraSystem::OnInputEvent is observed and passed on.
 // - -[BG3Application sendEvent:] can be swizzled: key and mouse button events are logged.
-// - With BG3_WASD_CODE_PROBE=1, game code can be patched: GetRotatedInput is observed and passed
-//   on. This is the one test that macOS could answer by stopping the game.
 
 #import <AppKit/AppKit.h>
 
+#include <dlfcn.h>
 #include <libkern/OSCacheControl.h>
+#include <libproc.h>
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
 #include <mach/mach_error.h>
@@ -52,9 +56,7 @@
 // Defined in stubs.S: the pass-through stubs and where each one continues.
 extern "C" {
 void CameraInputProbe();
-void RotatedInputProbe();
 extern void* g_camera_input_original;
-extern void* g_rotated_input_original;
 }
 
 namespace {
@@ -67,6 +69,22 @@ constexpr int kMaxObservedLines = 3000;  // keeps a long session from growing th
 // No objects with constructors at namespace scope: see "No static initializers" in CLAUDE.md.
 std::atomic<int> g_observed_lines{ 0 };
 IMP g_original_send_event = nullptr;
+
+// Character movement mode: the movement keys move the character and don't pan the camera. Camera
+// mode puts the game's controller-mode check back, so the keys pan the camera as without the mod.
+std::atomic<bool> g_character_mode{ true };
+uintptr_t g_controller_mode_flag = 0;  // the game's byte, set while a gamepad is in use
+constexpr int kCapsLockKeyCode = 57;         // kVK_CapsLock
+constexpr unsigned short kForwardKeyCode = 13;  // kVK_ANSI_W: the W key's position, whatever the layout
+constexpr unsigned short kBackwardKeyCode = 1;  // kVK_ANSI_S
+
+// Autoforward holds the Forward key down for the player: the game gets a key-down of its own and,
+// when autoforward ends, the key-up. Main thread only, like sendEvent:.
+bool g_autoforward = false;
+bool g_swallowing_toggle = false;  // the rest of the Shift+W press that toggled it
+
+// The game's camera movement actions: CameraBackward, CameraForward, CameraLeft, CameraRight.
+constexpr uint32_t kFirstCameraMove = 99, kLastCameraMove = 102;
 
 bool TakeLine()
 {
@@ -163,16 +181,15 @@ bool WriteCode(uintptr_t address, const void* bytes, size_t size)
 }
 
 // Copies the first 4 instructions of `target` into a trampoline that jumps on to target + 16, then
-// overwrites them with a jump to `probe`. `*original` points at the trampoline before the patch,
-// so the probe always has somewhere to continue.
-bool InlineHook(uintptr_t target, uintptr_t probe, void** original)
+// overwrites them with a jump to `hook`. `*original` points at the trampoline before the patch, so
+// calling it always reaches the original function.
+bool InlineHook(const char* name, uintptr_t target, uintptr_t hook, void** original)
 {
     uint32_t prologue[4];
     std::memcpy(prologue, reinterpret_cast<const void*>(target), sizeof prologue);
     for (uint32_t instruction : prologue) {
         if (arm64::IsPcRelative(instruction)) {
-            LOG_ERROR("Code probe: %#lx starts with a PC-relative instruction %08x", (unsigned long)target,
-                instruction);
+            LOG_ERROR("Inline hook: %s starts with a PC-relative instruction %08x", name, instruction);
             return false;
         }
     }
@@ -183,7 +200,7 @@ bool InlineHook(uintptr_t target, uintptr_t probe, void** original)
     void* memory = mmap(nullptr, vm_page_size, PROT_READ | PROT_WRITE | PROT_EXEC,
         MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
     if (memory == MAP_FAILED) {
-        LOG_ERROR("Code probe: mmap(MAP_JIT) failed: %s", std::strerror(errno));
+        LOG_ERROR("Inline hook: mmap(MAP_JIT) for %s failed: %s", name, std::strerror(errno));
         return false;
     }
     pthread_jit_write_protect_np(0);
@@ -191,14 +208,13 @@ bool InlineHook(uintptr_t target, uintptr_t probe, void** original)
     pthread_jit_write_protect_np(1);
     sys_icache_invalidate(memory, sizeof trampoline);
     *original = memory;
-    LOG_INFO("Code probe: trampoline at %p (MAP_JIT)", memory);
 
     uint32_t patch[4];
-    arm64::EncodeAbsoluteJump(probe, patch);
+    arm64::EncodeAbsoluteJump(hook, patch);
     if (!WriteCode(target, patch, sizeof patch)) {
         return false;
     }
-    LOG_INFO("Code probe: patched %#lx", (unsigned long)target);
+    LOG_INFO("Inline hook: %s at %#lx, trampoline %p", name, (unsigned long)target, memory);
     return true;
 }
 
@@ -237,8 +253,135 @@ bool InstallWasdUnlock(const macho::Image& image, const uintptr_t* addresses)
     if (!WriteCode(site, &nop, sizeof nop)) {
         return false;
     }
+    g_controller_mode_flag = uintptr_t(flag);
     LOG_INFO("WASD movement enabled");
     return true;
+}
+
+void CallOriginalSendEvent(id application, NSEvent* event)
+{
+    reinterpret_cast<void (*)(id, SEL, NSEvent*)>(g_original_send_event)(application, @selector(sendEvent:), event);
+}
+
+// Gives the game a Forward key event of the mod's own, for the window `source` went to.
+void SendForwardKey(id application, NSEvent* source, bool down)
+{
+    NSEvent* key = [NSEvent keyEventWithType:down ? NSEventTypeKeyDown : NSEventTypeKeyUp
+                                    location:NSZeroPoint
+                               modifierFlags:0
+                                   timestamp:NSProcessInfo.processInfo.systemUptime
+                                windowNumber:source.windowNumber
+                                     context:nil
+                                  characters:@"w"
+                 charactersIgnoringModifiers:@"w"
+                                   isARepeat:NO
+                                     keyCode:kForwardKeyCode];
+    if (key) {
+        CallOriginalSendEvent(application, key);
+    }
+}
+
+void SetAutoforward(id application, NSEvent* source, bool on)
+{
+    if (on == g_autoforward) {
+        return;
+    }
+    g_autoforward = on;
+    SendForwardKey(application, source, on);
+    LOG_INFO("Autoforward %s", on ? "on" : "off");
+}
+
+// Shift+W toggles autoforward, and the game never sees that press. A real Forward or Backward
+// ends it: Forward then keeps the key down until its own release, Backward needs the mod's Forward
+// released first. Returns true for events the game shouldn't get.
+bool HandleAutoforward(id application, NSEvent* event)
+{
+    const NSEventType type = event.type;
+    if (type != NSEventTypeKeyDown && type != NSEventTypeKeyUp) {
+        return false;
+    }
+    const unsigned short key = event.keyCode;
+    if (key == kForwardKeyCode && g_swallowing_toggle) {
+        if (type == NSEventTypeKeyUp) {
+            g_swallowing_toggle = false;
+        }
+        return true;
+    }
+    const NSEventModifierFlags modifiers = event.modifierFlags &
+        (NSEventModifierFlagShift | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand);
+    if (type == NSEventTypeKeyDown && !event.isARepeat && key == kForwardKeyCode &&
+        modifiers == NSEventModifierFlagShift && g_character_mode.load()) {
+        g_swallowing_toggle = true;
+        SetAutoforward(application, event, !g_autoforward);
+        return true;
+    }
+    if (g_autoforward && type == NSEventTypeKeyDown && !event.isARepeat &&
+        (key == kForwardKeyCode || key == kBackwardKeyCode)) {
+        g_autoforward = false;
+        if (key == kBackwardKeyCode) {
+            SendForwardKey(application, event, false);
+        }
+        LOG_INFO("Autoforward off");
+    }
+    return false;
+}
+
+// Main thread (sendEvent:).
+void SetCharacterMode(bool character, id application, NSEvent* source)
+{
+    if (character == g_character_mode.exchange(character)) {
+        return;
+    }
+    LOG_INFO("Movement mode: %s", character ? "character" : "camera");
+    if (!character) {
+        SetAutoforward(application, source, false);
+    }
+}
+
+// (anonymous namespace)::GetRotatedInput(short, bool) returns the movement input turned to the
+// camera, a Vector3f in s0-s2. The movement task asks for it before it starts and on every update.
+struct Vector3f {
+    float x, y, z;
+};
+using GetRotatedInputFn = Vector3f (*)(int16_t player, bool flag);
+GetRotatedInputFn g_get_rotated_input = nullptr;  // the trampoline to the original
+
+// In Camera mode the movement task gets no input, so it doesn't start and stops if it runs, like
+// the Linux port's OverrideMovementInput. A gamepad keeps working as without the mod.
+Vector3f RotatedInputHook(int16_t player, bool flag)
+{
+    const Vector3f input = g_get_rotated_input(player, flag);
+    const bool gamepad = g_controller_mode_flag && *reinterpret_cast<const volatile uint8_t*>(g_controller_mode_flag);
+    if (!g_character_mode.load(std::memory_order_relaxed) && !gamepad) {
+        return { 0.0f, 0.0f, 0.0f };
+    }
+    return input;
+}
+
+void InstallMovementHook(const uintptr_t* addresses)
+{
+    const uintptr_t target = addresses[symbols::GetRotatedInput];
+    if (!target) {
+        LOG_ERROR("GetRotatedInput not found: Camera mode won't stop the character");
+        return;
+    }
+    InlineHook("GetRotatedInput", target, reinterpret_cast<uintptr_t>(&RotatedInputHook),
+        reinterpret_cast<void**>(&g_get_rotated_input));
+}
+
+// Caps Lock is a lock key: macOS reports it as a modifier change, on press or on release
+// depending on the keyboard. Each change of its state counts as one press.
+void OnModifiersChanged(id application, NSEvent* event)
+{
+    static int last_caps_lock = -1;
+    if (event.keyCode != kCapsLockKeyCode) {
+        return;
+    }
+    const int caps_lock = (event.modifierFlags & NSEventModifierFlagCapsLock) ? 1 : 0;
+    if (caps_lock != last_caps_lock) {
+        last_caps_lock = caps_lock;
+        SetCharacterMode(!g_character_mode.load(), application, event);
+    }
 }
 
 // The game keeps player profiles in ~/Documents on macOS; older builds used Application Support.
@@ -258,21 +401,6 @@ void BindMovementKeys()
         }
     }
     LOG_WARN("No player profiles found yet; start the game once, then again to bind the movement keys");
-}
-
-void InstallCodeProbe(const uintptr_t* addresses)
-{
-    const uintptr_t target = addresses[symbols::GetRotatedInput];
-    if (!target) {
-        LOG_ERROR("Code probe: GetRotatedInput not found");
-        return;
-    }
-    LOG_INFO("Code probe: patching GetRotatedInput at %#lx. If the game is killed after this line, macOS "
-             "doesn't let the mod patch game code.",
-        (unsigned long)target);
-    if (InlineHook(target, reinterpret_cast<uintptr_t>(&RotatedInputProbe), &g_rotated_input_original)) {
-        LOG_INFO("Code probe: GetRotatedInput now goes through the probe");
-    }
 }
 
 void LogEvent(NSEvent* event)
@@ -329,6 +457,12 @@ void HookedSendEvent(id self, SEL command, NSEvent* event)
 {
     if (event) {
         LogEvent(event);
+        if (event.type == NSEventTypeFlagsChanged) {
+            OnModifiersChanged(self, event);
+        }
+        if (HandleAutoforward(self, event)) {
+            return;
+        }
     }
     reinterpret_cast<void (*)(id, SEL, NSEvent*)>(g_original_send_event)(self, command, event);
 }
@@ -360,6 +494,17 @@ void Run()
     uint32_t path_size = sizeof path;
     if (_NSGetExecutablePath(path, &path_size) == 0) {
         LOG_INFO("Executable: %s", path);
+    }
+    // macOS asks about privacy permissions on behalf of the responsible process. Started by Steam
+    // through the launcher, the game should be responsible for itself, as when opened normally.
+    using ResponsibleFn = pid_t (*)(pid_t pid);
+    if (const auto responsible = reinterpret_cast<ResponsibleFn>(
+            dlsym(RTLD_DEFAULT, "responsibility_get_pid_responsible_for_pid"))) {
+        const pid_t owner = responsible(getpid());
+        char owner_name[256] = "?";
+        proc_name(owner, owner_name, sizeof owner_name);
+        LOG_INFO("Responsible process: %d (%s)%s", int(owner), owner_name,
+            owner == getpid() ? ", the game itself" : "");
     }
     NSBundle* bundle = NSBundle.mainBundle;
     NSString* version = [bundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
@@ -403,12 +548,7 @@ void Run()
         });
     }
 
-    const char* code_probe = std::getenv("BG3_WASD_CODE_PROBE");
-    if (code_probe && std::strcmp(code_probe, "1") == 0) {
-        InstallCodeProbe(addresses);
-    } else {
-        LOG_INFO("Code probe off (BG3_WASD_CODE_PROBE=1 turns it on)");
-    }
+    InstallMovementHook(addresses);
     LOG_INFO("Probe ready: keys, mouse buttons and camera input events are logged from here on");
 }
 
@@ -438,6 +578,22 @@ extern "C" void ObserveCameraInput(void* self, const void* entity, const uint8_t
     static Kind kinds[64];
     static size_t kind_count = 0;
     static uint64_t calls = 0;
+
+    // In Character mode the camera doesn't get the movement keys' camera actions: their id becomes
+    // 0, as ExecuteCameraCommandHook does on Windows and on Linux.
+    if (event && g_character_mode.load(std::memory_order_relaxed)) {
+        uint32_t action;
+        std::memcpy(&action, event, sizeof action);
+        if (action >= kFirstCameraMove && action <= kLastCameraMove) {
+            const uint32_t none = 0;
+            std::memcpy(const_cast<uint8_t*>(event), &none, sizeof none);
+            static std::atomic<int> blocked{ 0 };
+            if (blocked.fetch_add(1) < 4) {
+                LOG_INFO("Camera movement action %u blocked in Character mode", action);
+            }
+            return;
+        }
+    }
 
     std::lock_guard lock(mutex);
     if (++calls == 1) {
@@ -474,16 +630,3 @@ extern "C" void ObserveCameraInput(void* self, const void* entity, const uint8_t
     LOG_INFO("camera input #%llu, kind %08x #%u: %s", (unsigned long long)calls, key, kind->count, hex);
 }
 
-extern "C" void ObserveRotatedInput(int16_t player, bool flag)
-{
-    static std::atomic<uint64_t> calls{ 0 };
-    static std::atomic<int64_t> last_log{ 0 };
-    const uint64_t count = calls.fetch_add(1) + 1;
-    const int64_t now = NowMs();
-    if (count == 1 || now - last_log.load() >= 5000) {
-        last_log = now;
-        if (TakeLine()) {
-            LOG_INFO("GetRotatedInput(%d, %d): %llu calls so far", int(player), int(flag), (unsigned long long)count);
-        }
-    }
-}

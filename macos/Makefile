@@ -12,8 +12,10 @@ HEADERS := $(wildcard src/*.hpp) ../linux/src/log.hpp ../linux/src/inputconfig.h
 # Shared with the Linux port.
 SHARED := ../linux/src/log.cpp ../linux/src/inputconfig.cpp
 
+LAUNCHER := $(BUILD)/$(NAME)-launch
+
 ifeq ($(shell uname -s),Darwin)
-all: $(LIBRARY) $(BUILD)/symtest
+all: $(LIBRARY) $(LAUNCHER) $(BUILD)/symtest
 else
 all: $(BUILD)/symtest
 endif
@@ -26,6 +28,10 @@ $(LIBRARY): src/probe.mm src/macho.cpp src/arm64.cpp src/patterns.cpp $(SHARED) 
 	$(CXX) $(MAC_FLAGS) $(CXXFLAGS) -fvisibility=hidden -fvisibility-inlines-hidden -dynamiclib \
 		-framework Foundation -framework AppKit -o $@ \
 		src/probe.mm src/macho.cpp src/arm64.cpp src/patterns.cpp $(SHARED) $(BUILD)/stubs.o
+
+# Steam runs it from the launch options: see src/launch.cpp.
+$(LAUNCHER): src/launch.cpp Makefile | $(BUILD)
+	$(CXX) $(MAC_FLAGS) $(CXXFLAGS) -framework CoreFoundation -o $@ $<
 
 $(BUILD)/symtest: tests/symtest.cpp src/macho.cpp src/arm64.cpp src/patterns.cpp $(HEADERS) Makefile | $(BUILD)
 	$(CXX) $(CXXFLAGS) -o $@ tests/symtest.cpp src/macho.cpp src/arm64.cpp src/patterns.cpp
