@@ -46,4 +46,31 @@ struct RotationAddresses {
 bool FindRotationAddresses(const uint8_t* text, size_t size, uintptr_t text_address,
     uintptr_t execute_camera_command, RotationAddresses& out, std::string& error);
 
+// The game logs telemetry events as LogTelemetry(rdi, rsi, const char* name in rdx). The calls for
+// these events tell the mod when combat and forced turn-based mode (FTB) start and end.
+struct TelemetryCalls {
+    enum Event { CombatStart, CombatEnd, FtbStart, FtbEnd, kEventCount };
+    static constexpr const char* kNames[kEventCount] = { "combat_start", "combat_end", "ftb_start", "ftb_end" };
+
+    uintptr_t log_telemetry = 0;
+    uintptr_t calls[kEventCount] = {};    // `call LogTelemetry` right after `lea rdx, [name]`
+    uintptr_t strings[kEventCount] = {};  // address of each name, as passed in rdx
+};
+
+bool FindTelemetryCalls(const uint8_t* text, size_t text_size, uintptr_t text_address, const uint8_t* rodata,
+    size_t rodata_size, uintptr_t rodata_address, TelemetryCalls& out, std::string& error);
+
+// The camera in Character mode. On Linux, UpdateCameraPosition (with GetViewport) is inlined into
+// UpdateCamera, where the Windows mod hooks BlockEdgePanningHook and PreventLosingChaseCamTargetHook.
+struct CharacterCameraAddresses {
+    // `jne skip` (0F 85 rel32) after `cmp byte [IsInControllerMode], 0`: edge panning is skipped with
+    // a gamepad. Rewritten to `nop ; jmp skip` (90 E9), edge panning is always skipped.
+    uintptr_t edge_panning_jne = 0;
+    // `call IsPointInsideEntityBounds(bounds in rdi:rsi, point in rdx)` for the chase camera target.
+    uintptr_t bounds_call = 0;
+};
+
+bool FindCharacterCameraAddresses(const uint8_t* text, size_t size, uintptr_t text_address,
+    uintptr_t is_in_controller_mode, CharacterCameraAddresses& out, std::string& error);
+
 }  // namespace wasd

@@ -3,6 +3,7 @@
 #include <dlfcn.h>
 
 #include <atomic>
+#include <cerrno>
 #include <cstring>
 #include <mutex>
 
@@ -69,6 +70,7 @@ struct RotationState {
     Input trigger;     // the press that started the current rotation
 } g_rotation;
 
+std::atomic<bool> g_rotating{ false };  // mirrors g_rotation.rotating for lock-free reads
 std::atomic<RotationCursor> g_cursor_character{ RotationCursor::Invisible };
 std::atomic<RotationCursor> g_cursor_camera{ RotationCursor::Invisible };
 std::atomic<void*> g_window{ nullptr };
@@ -122,6 +124,7 @@ void OnRotationStart()
     std::lock_guard lock(g_rotation.mutex);
     const bool was_rotating = g_rotation.rotating;
     g_rotation.rotating = true;
+    g_rotating = true;
 
     const RotationCursor type = CurrentRotationCursor();
     if (type == RotationCursor::Invisible) {
@@ -158,6 +161,7 @@ void EndRotation(const char* reason)
         return;
     }
     g_rotation.rotating = false;
+    g_rotating = false;
     if (g_rotation.restore.x != -1) {  // skip the pop the game does on startup
         g_rotation.should_override_cursor = false;
     }
@@ -216,7 +220,85 @@ Vec4 SetVirtualCursorPosHook(uint64_t self, uint64_t mouse, uint64_t a2, uint64_
     return position;
 }
 
+// Character mode camera.
+constexpr uint16_t kJneOpcode = 0x850F;    // bytes 0F 85: jne rel32
+constexpr uint16_t kNopJmpOpcode = 0xE990;  // bytes 90 E9: nop ; jmp rel32, same target
+
+std::mutex g_edge_panning_mutex;
+uintptr_t g_edge_panning_jne = 0;
+bool g_edge_panning_blocked = false;
+CursorFn g_bounds_test = nullptr;
+
+bool CharacterModeCameraActive()
+{
+    const State& state = GetState();
+    return state.IsCharacterMovementMode() && !state.in_combat;
+}
+
+// PreventLosingChaseCamTargetHook: report "not inside" in Character mode, like the Windows mod.
+RegisterPair BoundsTestHook(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5)
+{
+    if (CharacterModeCameraActive()) {
+        return { 0, 0 };
+    }
+    return g_bounds_test(a0, a1, a2, a3, a4, a5);
+}
+
 }  // namespace
+
+void UpdateCharacterModeCamera()
+{
+    std::lock_guard lock(g_edge_panning_mutex);
+    if (!g_edge_panning_jne) {
+        return;
+    }
+    const bool block = CharacterModeCameraActive();
+    if (block == g_edge_panning_blocked) {
+        return;
+    }
+    if (!mem::WriteCodeAtomic16(g_edge_panning_jne, block ? kNopJmpOpcode : kJneOpcode)) {
+        LOG_WARN("Could not %s edge panning: %s", block ? "block" : "restore", std::strerror(errno));
+        return;
+    }
+    uint16_t now;
+    std::memcpy(&now, reinterpret_cast<const void*>(g_edge_panning_jne), sizeof now);
+    g_edge_panning_blocked = block;
+    LOG_INFO("Edge panning %s (code now %02x %02x)", block ? "blocked" : "allowed", now & 0xFF, now >> 8);
+}
+
+bool InstallCharacterModeCamera(const mem::MainExecutable& exe, uintptr_t is_in_controller_mode)
+{
+    auto file_address = [&](uintptr_t address) { return static_cast<unsigned long>(address - exe.load_bias); };
+    CharacterCameraAddresses addresses;
+    std::string error;
+    if (!FindCharacterCameraAddresses(reinterpret_cast<const uint8_t*>(exe.code.start), exe.code.size,
+            exe.code.start, is_in_controller_mode, addresses, error)) {
+        LOG_WARN("Edge panning and chase camera unchanged in Character mode: %s", error.c_str());
+        return false;
+    }
+    uint16_t opcode;
+    std::memcpy(&opcode, reinterpret_cast<const void*>(addresses.edge_panning_jne), sizeof opcode);
+    void* stub = mem::MakeJumpStub(exe.code.start, reinterpret_cast<const void*>(&BoundsTestHook));
+    if (opcode != kJneOpcode || (addresses.edge_panning_jne & 63) == 63 || !stub) {
+        LOG_WARN("Edge panning and chase camera unchanged in Character mode: unexpected code or no jump stub");
+        return false;
+    }
+
+    int32_t rel;
+    std::memcpy(&rel, reinterpret_cast<const void*>(addresses.bounds_call + 1), sizeof rel);
+    g_bounds_test = reinterpret_cast<CursorFn>(addresses.bounds_call + 5 + static_cast<int64_t>(rel));
+    if (!mem::RedirectCall(addresses.bounds_call, stub)) {
+        LOG_WARN("Chase camera unchanged in Character mode: could not hook the bounds test");
+    }
+    {
+        std::lock_guard lock(g_edge_panning_mutex);
+        g_edge_panning_jne = addresses.edge_panning_jne;
+    }
+    UpdateCharacterModeCamera();
+    LOG_INFO("Edge panning check %#lx, chase camera bounds call %#lx", file_address(addresses.edge_panning_jne),
+        file_address(addresses.bounds_call));
+    return true;
+}
 
 RotationCursor ParseRotationCursor(const std::string& name)
 {
@@ -239,6 +321,8 @@ void SetRotationCursors(RotationCursor character_mode, RotationCursor camera_mod
 }
 
 void SetWindow(void* window) { g_window = window; }
+
+bool IsRotating() { return g_rotating; }
 
 void OnInputEvent(bool mouse_button, int code, bool down)
 {

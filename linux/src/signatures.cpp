@@ -209,4 +209,97 @@ bool FindRotationAddresses(const uint8_t* text, size_t size, uintptr_t text_addr
     return true;
 }
 
+bool FindCharacterCameraAddresses(const uint8_t* text, size_t size, uintptr_t text_address,
+    uintptr_t is_in_controller_mode, CharacterCameraAddresses& out, std::string& error)
+{
+    // Inlined GetViewport found a viewport (r12), then: `cmp byte [IsInControllerMode], 0 ; jne skip`
+    // and the edge panning code reads the viewport at +0x21A8.
+    const auto edge = FindPattern(text, size,
+        "4D 85 E4 0F 84 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 0F 85 ?? ?? ?? ?? 41 8B 8C 24 A8 21 00 00");
+    if (edge.size() != 1) {
+        error = "edge panning signature matched " + std::to_string(edge.size()) + " times, expected 1";
+        return false;
+    }
+    if (text_address + RelTarget(text, edge[0] + 11, edge[0] + 16) != is_in_controller_mode) {
+        error = "edge panning check doesn't read IsInControllerMode";
+        return false;
+    }
+    out.edge_panning_jne = text_address + edge[0] + 16;
+
+    // The bounds test of the chase camera target; `xor al, 1` inverts its result right after.
+    const auto bounds = FindPattern(text, size, "48 8B 79 20 48 8B 71 28 48 83 C2 3C E8 ?? ?? ?? ?? 34 01");
+    if (bounds.size() != 1) {
+        error = "chase camera signature matched " + std::to_string(bounds.size()) + " times, expected 1";
+        return false;
+    }
+    out.bounds_call = text_address + bounds[0] + 12;
+    return true;
+}
+
+bool FindTelemetryCalls(const uint8_t* text, size_t text_size, uintptr_t text_address, const uint8_t* rodata,
+    size_t rodata_size, uintptr_t rodata_address, TelemetryCalls& out, std::string& error)
+{
+    // Every place each name sits in .rodata (the linker may share it with a longer string).
+    std::vector<std::pair<uintptr_t, int>> names;
+    for (int event = 0; event < TelemetryCalls::kEventCount; ++event) {
+        const char* name = TelemetryCalls::kNames[event];
+        const size_t length = std::strlen(name) + 1;  // with the terminating NUL
+        for (size_t pos = 0; pos + length <= rodata_size; ++pos) {
+            const void* found = memmem(rodata + pos, rodata_size - pos, name, length);
+            if (!found) {
+                break;
+            }
+            pos = static_cast<const uint8_t*>(found) - rodata;
+            names.emplace_back(rodata_address + pos, event);
+        }
+    }
+
+    // One pass over the code: `lea rdx, [rip+name]`, then the first `call rel32` within 16 bytes.
+    int hits[TelemetryCalls::kEventCount] = {};
+    for (size_t p = 0; p + 7 <= text_size; ++p) {
+        const void* lea = memmem(text + p, text_size - p, "\x48\x8D\x15", 3);
+        if (!lea) {
+            break;
+        }
+        p = static_cast<const uint8_t*>(lea) - text;
+        if (p + 7 > text_size) {
+            break;
+        }
+        const uintptr_t target = text_address + RelTarget(text, p + 3, p + 7);
+        int event = -1;
+        for (const auto& [address, name_event] : names) {
+            if (address == target) {
+                event = name_event;
+            }
+        }
+        if (event < 0) {
+            continue;
+        }
+        for (size_t c = p + 7; c < p + 7 + 16 && c + 5 <= text_size; ++c) {
+            if (text[c] != 0xE8) {
+                continue;
+            }
+            const uintptr_t callee = text_address + RelTarget(text, c + 1, c + 5);
+            if (out.log_telemetry && callee != out.log_telemetry) {
+                error = std::string("\"") + TelemetryCalls::kNames[event] +
+                        "\" is passed to a different function than the other events";
+                return false;
+            }
+            out.log_telemetry = callee;
+            out.calls[event] = text_address + c;
+            out.strings[event] = target;
+            ++hits[event];
+            break;
+        }
+    }
+    for (int event = 0; event < TelemetryCalls::kEventCount; ++event) {
+        if (hits[event] != 1) {
+            error = std::string("telemetry event \"") + TelemetryCalls::kNames[event] + "\": " +
+                    std::to_string(hits[event]) + " calls, expected 1";
+            return false;
+        }
+    }
+    return true;
+}
+
 }  // namespace wasd

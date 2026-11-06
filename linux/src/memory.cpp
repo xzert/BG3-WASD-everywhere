@@ -34,6 +34,8 @@ int OnLoadedObject(dl_phdr_info* info, size_t, void* data)
             exe.code = segment;
         } else if ((ph.p_flags & PF_W) && exe.data_count < 4) {
             exe.data[exe.data_count++] = segment;
+        } else if (!(ph.p_flags & (PF_X | PF_W)) && segment.size > exe.rodata.size) {
+            exe.rodata = segment;
         }
     }
     return 1;  // stop after the main program
@@ -128,6 +130,16 @@ uintptr_t RedirectCall(uintptr_t site, const void* stub)
         return 0;
     }
     return original;
+}
+
+bool WriteCodeAtomic16(uintptr_t address, uint16_t value)
+{
+    if ((address & 63) == 63 || !Protect(address, sizeof value, PROT_READ | PROT_WRITE | PROT_EXEC)) {
+        return false;
+    }
+    *reinterpret_cast<volatile uint16_t*>(address) = value;
+    __builtin___clear_cache(reinterpret_cast<char*>(address), reinterpret_cast<char*>(address + sizeof value));
+    return Protect(address, sizeof value, PROT_READ | PROT_EXEC);
 }
 
 bool ReplaceVirtualCall(uintptr_t site, const void* stub)

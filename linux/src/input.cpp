@@ -58,6 +58,8 @@ constexpr NamedKey kMouseButtons[] = {
 };
 
 std::vector<Combo> g_bindings[kCommandCount];
+std::string g_forward_keys = "key:w,key:up";
+std::string g_backward_keys = "key:s,key:down";
 bool g_scancode_down[512] = {};
 bool g_mouse_down[8] = {};
 std::atomic<bool> g_enabled{ false };
@@ -262,6 +264,9 @@ void OnSdlEvent(const void* event)
         }
         const bool down = type == kMouseButtonDown;
         g_mouse_down[button] = down;
+        if (button == 1) {
+            GetState().mouse_left_down = down;
+        }
         camera::OnInputEvent(true, button, down);
         OnKey({ Key::MouseButton, button }, down);
     }
@@ -277,9 +282,27 @@ void SetBindings(const Settings& s)
     g_bindings[ToggleWalkspeed] = ParseBinding(s.toggle_walkspeed, "ToggleWalkspeed");
     g_bindings[HoldWalkspeed] = ParseBinding(s.hold_walkspeed, "HoldWalkspeed");
     g_bindings[ReloadConfig] = ParseBinding(s.reload_config, "ReloadConfig");
-    // TODO: read these from the game's inputconfig, like the Windows mod does.
-    g_bindings[Forward] = ParseBinding("key:w,key:up", "Forward");
-    g_bindings[Backward] = ParseBinding("key:s,key:down", "Backward");
+    g_bindings[Forward] = ParseBinding(g_forward_keys, "CharacterMoveForward");
+    g_bindings[Backward] = ParseBinding(g_backward_keys, "CharacterMoveBackward");
+}
+
+void SetMovementKeys(const std::vector<std::string>& forward, const std::vector<std::string>& backward)
+{
+    auto join = [](const std::vector<std::string>& keys) {
+        std::string joined;
+        for (const std::string& key : keys) {
+            joined += (joined.empty() ? "" : ",") + key;
+        }
+        return joined;
+    };
+    if (!forward.empty()) {
+        g_forward_keys = join(forward);
+    }
+    if (!backward.empty()) {
+        g_backward_keys = join(backward);
+    }
+    g_bindings[Forward] = ParseBinding(g_forward_keys, "CharacterMoveForward");
+    g_bindings[Backward] = ParseBinding(g_backward_keys, "CharacterMoveBackward");
 }
 
 void Enable() { g_enabled = true; }
@@ -300,6 +323,9 @@ extern "C" __attribute__((visibility("default"))) int SDL_PollEvent(void* event)
     static bool polling = false;
     if (!polling) {
         polling = true;
+        if (wasd::TakeReloadRequest()) {
+            wasd::ReloadSettings();
+        }
         wasd::camera::OnFrameStart();
     }
     const int result = real(event);

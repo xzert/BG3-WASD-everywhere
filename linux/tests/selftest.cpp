@@ -1,20 +1,63 @@
-// Runs the mod's signature search on a bg3 binary on disk, so a new game build can be checked
-// without starting the game.
+// Runs the mod's signature searches on a bg3 binary on disk, so a new game build can be checked
+// without starting the game. With --inputconfig, runs the key binding patcher on a file instead.
 //
 // Usage: selftest <path to bg3>
+//        selftest --inputconfig <inputconfig_p1.json> <output file>
 #include <elf.h>
 
 #include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
+#include "inputconfig.hpp"
 #include "signatures.hpp"
+
+namespace {
+
+struct Segment {
+    const uint8_t* data = nullptr;
+    size_t size = 0;
+    uintptr_t address = 0;
+};
+
+unsigned long Hex(uintptr_t value) { return static_cast<unsigned long>(value); }
+
+}  // namespace
+
+int PatchInputconfig(const char* in_path, const char* out_path)
+{
+    std::ifstream in_file(in_path, std::ios::binary);
+    const std::string in((std::istreambuf_iterator<char>(in_file)), std::istreambuf_iterator<char>());
+    std::string out;
+    const wasd::inputconfig::Result result = wasd::inputconfig::PatchText(in, out);
+    if (!result.ok) {
+        std::printf("FAILED: %s\n", result.error.c_str());
+        return 1;
+    }
+    std::ofstream(out_path, std::ios::binary) << out;
+    auto print = [](const char* label, const std::vector<std::string>& keys) {
+        std::printf("%s:", label);
+        for (const std::string& key : keys) {
+            std::printf(" %s", key.c_str());
+        }
+        std::printf("\n");
+    };
+    std::printf("changed: %s\n", result.changed ? "yes" : "no");
+    print("forward keys", result.forward_keys);
+    print("backward keys", result.backward_keys);
+    std::printf("rotation on left click: %s\n", result.rotate_includes_left_click ? "yes" : "no");
+    return 0;
+}
 
 int main(int argc, char** argv)
 {
+    if (argc == 4 && std::strcmp(argv[1], "--inputconfig") == 0) {
+        return PatchInputconfig(argv[2], argv[3]);
+    }
     if (argc != 2) {
         std::fprintf(stderr, "usage: %s <path to bg3>\n", argv[0]);
         return 2;
@@ -36,56 +79,91 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    // Same choice as the mod at runtime: the executable segment and the largest read-only one.
+    Segment text, rodata;
     for (int i = 0; i < header.e_phnum; ++i) {
         Elf64_Phdr ph;
         std::memcpy(&ph, data.data() + header.e_phoff + i * header.e_phentsize, sizeof ph);
-        if (ph.p_type != PT_LOAD || !(ph.p_flags & PF_X)) {
+        if (ph.p_type != PT_LOAD) {
             continue;
         }
-
-        wasd::GameAddresses game;
-        std::string error;
-        const auto start = std::chrono::steady_clock::now();
-        const bool ok = wasd::FindGameAddresses(data.data() + ph.p_offset, ph.p_filesz, ph.p_vaddr, game, error);
-        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
-
-        std::printf("code segment %#lx, %.0f MiB, searched in %ld ms\n", static_cast<unsigned long>(ph.p_vaddr),
-            ph.p_filesz / 1048576.0, static_cast<long>(ms.count()));
-        if (!ok) {
-            std::printf("FAILED: %s\n", error.c_str());
-            return 1;
+        const Segment segment{ data.data() + ph.p_offset, ph.p_filesz, ph.p_vaddr };
+        if (ph.p_flags & PF_X) {
+            text = segment;
+        } else if (!(ph.p_flags & PF_W) && segment.size > rodata.size) {
+            rodata = segment;
         }
-        std::printf("WASD unlock          %#lx\n", static_cast<unsigned long>(game.wasd_unlock));
-        std::printf("IsInControllerMode   %#lx\n", static_cast<unsigned long>(game.is_in_controller_mode));
-        std::printf("GetInputValue        %#lx\n", static_cast<unsigned long>(game.get_input_value));
-        for (const uintptr_t call : game.get_input_value_calls) {
-            std::printf("  called from        %#lx\n", static_cast<unsigned long>(call));
-        }
-
-        uintptr_t camera = 0;
-        if (!wasd::FindExecuteCameraCommand(data.data() + ph.p_offset, ph.p_filesz, ph.p_vaddr, camera, error)) {
-            std::printf("FAILED (optional camera block): %s\n", error.c_str());
-            return 1;
-        }
-        std::printf("ExecuteCameraCommand %#lx\n", static_cast<unsigned long>(camera));
-
-        wasd::RotationAddresses rotation;
-        if (!wasd::FindRotationAddresses(data.data() + ph.p_offset, ph.p_filesz, ph.p_vaddr, camera, rotation, error)) {
-            std::printf("FAILED (optional camera rotation): %s\n", error.c_str());
-            return 1;
-        }
-        std::printf("Rotation cursor push %#lx, called from", static_cast<unsigned long>(rotation.cursor_push));
-        for (const uintptr_t call : rotation.push_calls) {
-            std::printf(" %#lx", static_cast<unsigned long>(call));
-        }
-        std::printf("\nRotation cursor pop  %#lx, called from", static_cast<unsigned long>(rotation.cursor_pop));
-        for (const uintptr_t call : rotation.pop_calls) {
-            std::printf(" %#lx", static_cast<unsigned long>(call));
-        }
-        std::printf("\nSetVirtualCursorPos  call at %#lx, vtable slot %#x\n",
-            static_cast<unsigned long>(rotation.set_virtual_cursor_call), rotation.set_virtual_cursor_slot);
-        return 0;
     }
-    std::fprintf(stderr, "no executable segment found\n");
-    return 1;
+    if (!text.data || !rodata.data) {
+        std::fprintf(stderr, "code or read-only data segment not found\n");
+        return 1;
+    }
+
+    const auto start = std::chrono::steady_clock::now();
+    std::string error;
+    wasd::GameAddresses game;
+    if (!wasd::FindGameAddresses(text.data, text.size, text.address, game, error)) {
+        std::printf("FAILED: %s\n", error.c_str());
+        return 1;
+    }
+    std::printf("WASD unlock          %#lx\n", Hex(game.wasd_unlock));
+    std::printf("IsInControllerMode   %#lx\n", Hex(game.is_in_controller_mode));
+    std::printf("GetInputValue        %#lx, called from", Hex(game.get_input_value));
+    for (const uintptr_t call : game.get_input_value_calls) {
+        std::printf(" %#lx", Hex(call));
+    }
+    std::printf("\n");
+
+    // The optional features are checked too: a failure here means the feature stays off in game.
+    int failures = 0;
+    uintptr_t camera = 0;
+    if (!wasd::FindExecuteCameraCommand(text.data, text.size, text.address, camera, error)) {
+        std::printf("FAILED (camera block and rotation): %s\n", error.c_str());
+        ++failures;
+    } else {
+        std::printf("ExecuteCameraCommand %#lx\n", Hex(camera));
+        wasd::RotationAddresses rotation;
+        if (!wasd::FindRotationAddresses(text.data, text.size, text.address, camera, rotation, error)) {
+            std::printf("FAILED (camera rotation): %s\n", error.c_str());
+            ++failures;
+        } else {
+            std::printf("Rotation cursor push %#lx, called from", Hex(rotation.cursor_push));
+            for (const uintptr_t call : rotation.push_calls) {
+                std::printf(" %#lx", Hex(call));
+            }
+            std::printf("\nRotation cursor pop  %#lx, called from", Hex(rotation.cursor_pop));
+            for (const uintptr_t call : rotation.pop_calls) {
+                std::printf(" %#lx", Hex(call));
+            }
+            std::printf("\nSetVirtualCursorPos  call at %#lx, vtable slot %#x\n", Hex(rotation.set_virtual_cursor_call),
+                rotation.set_virtual_cursor_slot);
+        }
+    }
+
+    wasd::CharacterCameraAddresses character_camera;
+    if (!wasd::FindCharacterCameraAddresses(text.data, text.size, text.address, game.is_in_controller_mode,
+            character_camera, error)) {
+        std::printf("FAILED (edge panning and chase camera): %s\n", error.c_str());
+        ++failures;
+    } else {
+        std::printf("Edge panning jne     %#lx, chase camera bounds call %#lx\n",
+            Hex(character_camera.edge_panning_jne), Hex(character_camera.bounds_call));
+    }
+
+    wasd::TelemetryCalls telemetry;
+    if (!wasd::FindTelemetryCalls(text.data, text.size, text.address, rodata.data, rodata.size, rodata.address,
+            telemetry, error)) {
+        std::printf("FAILED (combat and turn-based events): %s\n", error.c_str());
+        ++failures;
+    } else {
+        std::printf("LogTelemetry         %#lx, events:", Hex(telemetry.log_telemetry));
+        for (int event = 0; event < wasd::TelemetryCalls::kEventCount; ++event) {
+            std::printf(" %s@%#lx", wasd::TelemetryCalls::kNames[event], Hex(telemetry.calls[event]));
+        }
+        std::printf("\n");
+    }
+
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+    std::printf("searched %.0f MiB of code in %ld ms\n", text.size / 1048576.0, static_cast<long>(ms.count()));
+    return failures ? 1 : 0;
 }

@@ -11,7 +11,7 @@ CXXFLAGS += -std=c++20 -fPIC -fvisibility=hidden -fvisibility-inlines-hidden -Wa
 SO_LDFLAGS := -shared -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL -Wl,-z,defs
 LDLIBS := -ldl -pthread
 
-SRC := main.cpp camera.cpp input.cpp log.cpp memory.cpp settings.cpp signatures.cpp
+SRC := main.cpp camera.cpp input.cpp inputconfig.cpp log.cpp memory.cpp settings.cpp signatures.cpp
 OBJ := $(SRC:%.cpp=$(BUILD)/%.o)
 HEADERS := $(wildcard src/*.hpp) src/keymap.inc
 
@@ -20,8 +20,8 @@ all: $(BUILD)/libbg3wasd.so $(BUILD)/selftest $(BUILD)/BG3WASD.toml
 $(BUILD)/libbg3wasd.so: $(OBJ)
 	$(CXX) $(SO_LDFLAGS) -o $@ $^ $(LDLIBS)
 
-$(BUILD)/selftest: tests/selftest.cpp $(BUILD)/signatures.o
-	$(CXX) $(CXXFLAGS) -Isrc -o $@ $^
+$(BUILD)/selftest: tests/selftest.cpp $(BUILD)/signatures.o $(BUILD)/inputconfig.o $(BUILD)/log.o
+	$(CXX) $(CXXFLAGS) -Isrc -o $@ $^ -pthread
 
 $(BUILD)/%.o: src/%.cpp $(HEADERS) | $(BUILD)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<

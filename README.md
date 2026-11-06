@@ -37,23 +37,26 @@ port has not been tested on Steam Deck yet.
 | WASD character movement, autoforward, walking, Character/Camera movement mode | ✅ | ✅ | — |
 | Movement keys don't pan the camera in Character mode | ✅ | ✅ | — |
 | Camera rotation with an invisible or centered cursor | ✅ | ✅ ¹ | — |
-| Automatic Camera mode in combat | ✅ | — | — |
+| Automatic Camera mode in combat | ✅ | ✅ ⁴ | — |
 | `ToggleCameraRotation` (mouselook without holding a button) | ✅ | — | — |
 | Rotation turns off in menus, dialogs, loot and photo mode | ✅ | — ² | — |
-| No edge panning in Character mode | ✅ | — | — |
-| Rotate + left click moves forward | ✅ | — | — |
+| No edge panning in Character mode | ✅ | ✅ | — |
+| Rotate + left click moves forward | ✅ | ✅ | — |
 | Unclickable active character and camera occluders | ✅ | — | — |
 | Blocking click-to-move (`BlockInteractMove`) | ✅ | — | — |
-| Movement mode follows turn-based mode (FTB) | ✅ | — | — |
-| Movement keys bound automatically | ✅ | — ³ | — |
-| Config reloads when the file changes | ✅ | — ⁴ | — |
+| Movement mode follows turn-based mode (FTB) | ✅ | ✅ | — |
+| Movement keys bound automatically | ✅ | ✅ ³ | — |
+| Config reloads when the file changes | ✅ | ✅ | — |
 
 Notes on the Linux column:
 
 - ¹ `centered` shows the game's rotation icon instead of a crosshair.
 - ² The cursor comes back when you release the rotate button.
-- ³ Bind them yourself, see step 3 below.
-- ⁴ Use the `ReloadConfig` hotkey.
+- ³ Bound when the game starts. If you rebind the camera keys in the game's menu, restart the game
+  to apply them to movement.
+- ⁴ Combat is detected from the game's combat start and end events. If you load a save in the
+  middle of a fight, the mod notices only at the next start or end, so press `ToggleMovementMode`
+  yourself.
 
 ### Install on Linux
 
@@ -76,18 +79,7 @@ and `make`.
 
    It should print the addresses it found. `FAILED` means your game version isn't supported yet.
 
-3. Bind the movement keys. Add these lines to
-   `~/.local/share/Larian Studios/Baldur's Gate 3/PlayerProfiles/Public/inputconfig_p1.json`. If
-   the file doesn't exist, create it as a JSON object with just these lines:
-
-   ```json
-   "CharacterMoveForward": ["c:leftstick_ypos", "key:w", "key:up"],
-   "CharacterMoveBackward": ["c:leftstick_yneg", "key:s", "key:down"],
-   "CharacterMoveLeft": ["c:leftstick_xneg", "key:a", "key:left"],
-   "CharacterMoveRight": ["c:leftstick_xpos", "key:d", "key:right"]
-   ```
-
-4. In Steam, open Baldur's Gate 3 → Properties → General → Launch Options and enter:
+3. In Steam, open Baldur's Gate 3 → Properties → General → Launch Options and enter:
 
    ```
    LD_PRELOAD="/absolute/path/to/linux/build/libbg3wasd.so:$LD_PRELOAD" %command%
@@ -95,8 +87,12 @@ and `make`.
 
    The path must not contain spaces.
 
+On start, the mod binds character movement to your camera movement keys (W/A/S/D and the arrows by
+default). It does this in `inputconfig_p1.json` of every player profile and keeps the original as
+`inputconfig_p1.json.bg3wasd.bak`.
+
 To check that it works, start the game and look at `~/.local/state/BG3WASD/BG3WASD.log`. It should
-end with `WASD movement enabled`. Caps Lock switches between Character and Camera movement, and
+contain `WASD movement enabled`. Caps Lock switches between Character and Camera movement, and
 Shift+W toggles autoforward. Hotkeys, walking speed and the rotation cursor are set in
 `BG3WASD.toml` next to the library.
 

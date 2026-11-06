@@ -30,4 +30,14 @@ void OnInputEvent(bool mouse_button, int code, bool down);
 
 void SetWindow(void* window);
 
+// Whether the camera is being rotated right now (any thread).
+bool IsRotating();
+
+// In Character mode outside combat: no edge panning, and the chase camera keeps its target
+// (BlockEdgePanningHook and PreventLosingChaseCamTargetHook on Windows).
+bool InstallCharacterModeCamera(const mem::MainExecutable& exe, uintptr_t is_in_controller_mode);
+
+// Call when the movement mode or the combat state changes.
+void UpdateCharacterModeCamera();
+
 }  // namespace wasd::camera

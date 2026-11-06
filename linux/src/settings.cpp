@@ -1,7 +1,15 @@
 #include "settings.hpp"
 
+#include <poll.h>
+#include <sys/inotify.h>
+#include <unistd.h>
+
+#include <atomic>
+#include <cerrno>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
+#include <thread>
 
 #include "camera.hpp"
 #include "input.hpp"
@@ -13,6 +21,7 @@ namespace {
 
 std::string g_path;
 bool g_loaded_once = false;
+std::atomic<bool> g_reload_requested{ false };
 
 std::string Trim(const std::string& s)
 {
@@ -103,12 +112,68 @@ bool ParseSettingsFile(const std::string& path, Settings& s)
             s.rotation_cursor_in_character_mode = value;
         } else if (key == "CameraMovementRotationCursor") {
             s.rotation_cursor_in_camera_mode = value;
+        } else if (key == "AutoToggleMovementMode") {
+            s.auto_toggle_movement_mode = ParseBool(value, s.auto_toggle_movement_mode);
+        } else if (key == "SwitchToWalkingAfterCombat") {
+            s.walk_after_combat = ParseBool(value, s.walk_after_combat);
+        } else if (key == "RotatePlusLeftclickMovesForward") {
+            s.rotate_plus_lmb_is_forward = ParseBool(value, s.rotate_plus_lmb_is_forward);
         }
     }
     return true;
 }
 
 void SetSettingsPath(std::string path) { g_path = std::move(path); }
+
+bool TakeReloadRequest() { return g_reload_requested.exchange(false); }
+
+void WatchSettingsFile()
+{
+    const auto slash = g_path.rfind('/');
+    const std::string dir = slash == std::string::npos ? "." : g_path.substr(0, slash);
+    const std::string name = slash == std::string::npos ? g_path : g_path.substr(slash + 1);
+
+    const int fd = inotify_init1(IN_CLOEXEC);
+    // Editors often save by writing a temporary file and renaming it, so watch the directory.
+    if (fd < 0 || inotify_add_watch(fd, dir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE) < 0) {
+        LOG_WARN("Config changes won't be picked up automatically (inotify on %s: %s)", dir.c_str(),
+            std::strerror(errno));
+        if (fd >= 0) {
+            close(fd);
+        }
+        return;
+    }
+
+    std::thread([fd, name] {
+        constexpr int kDebounceMs = 1000;  // reload once the file has been quiet for a second
+        alignas(inotify_event) char buffer[4096];
+        bool pending = false;
+        for (;;) {
+            pollfd poll_fd{ fd, POLLIN, 0 };
+            const int ready = poll(&poll_fd, 1, pending ? kDebounceMs : -1);
+            if (ready == 0) {
+                pending = false;
+                g_reload_requested = true;
+                continue;
+            }
+            if (ready < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            const ssize_t length = read(fd, buffer, sizeof buffer);
+            for (ssize_t offset = 0; offset < length;) {
+                const auto* event = reinterpret_cast<const inotify_event*>(buffer + offset);
+                if (event->len && name == event->name) {
+                    pending = true;
+                }
+                offset += sizeof(inotify_event) + event->len;
+            }
+        }
+        LOG_WARN("Stopped watching the config file");
+    }).detach();
+}
 
 void ReloadSettings()
 {
@@ -125,6 +190,9 @@ void ReloadSettings()
 
     State& state = GetState();
     state.walk_speed = settings.walk_speed;
+    state.auto_toggle_movement_mode = settings.auto_toggle_movement_mode;
+    state.walk_after_combat = settings.walk_after_combat;
+    state.rotate_plus_lmb_is_forward = settings.rotate_plus_lmb_is_forward;
     input::SetBindings(settings);
     camera::SetRotationCursors(camera::ParseRotationCursor(settings.rotation_cursor_in_character_mode),
         camera::ParseRotationCursor(settings.rotation_cursor_in_camera_mode));

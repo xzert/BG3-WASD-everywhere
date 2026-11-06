@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <climits>
 #include <cstdlib>
 #include <cstring>
@@ -13,6 +14,7 @@
 
 #include "camera.hpp"
 #include "input.hpp"
+#include "inputconfig.hpp"
 #include "log.hpp"
 #include "memory.hpp"
 #include "settings.hpp"
@@ -52,6 +54,17 @@ Vec4 OverrideMovementInput(uint64_t controller, uint64_t command, uint64_t playe
     if (state.autoforward && command_id == kCharacterMoveForward) {
         set(1.0f, 1.0f);
     }
+    if (state.rotate_plus_lmb_is_forward && !state.rotate_keys_include_lmb) {
+        // Holding the rotate button and the left mouse button walks forward, like in MMOs.
+        const bool rotate_and_lmb = state.mouse_left_down && camera::IsRotating();
+        if (state.rotate_and_lmb_last_frame && !rotate_and_lmb) {
+            state.autoforward = false;
+        }
+        if (rotate_and_lmb && command_id == kCharacterMoveForward) {
+            set(1.0f, 1.0f);
+        }
+        state.rotate_and_lmb_last_frame = rotate_and_lmb;
+    }
     if (state.walking_toggled != state.walking_held) {
         const float speed = state.walk_speed;
         set(value[0] * speed, value[1] * speed);
@@ -88,10 +101,93 @@ RegisterPair BlockCameraMoveCommands(uint64_t self, uint64_t context, uint64_t c
     auto* command_id = reinterpret_cast<uint32_t*>(command);
     const State& state = GetState();
     if (command_id && *command_id >= kCameraBackward && *command_id <= kCameraRight &&
-        state.IsCharacterMovementMode() && !state.IsInControllerMode()) {
+        state.IsCharacterMovementMode() && !state.in_combat && !state.IsInControllerMode()) {
         *command_id = 0;
     }
     return g_execute_camera_command(self, context, command, a3, a4, a5);
+}
+
+using LogTelemetryFn = RegisterPair (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+
+LogTelemetryFn g_log_telemetry = nullptr;
+TelemetryCalls g_telemetry;
+
+int64_t NowMs()
+{
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+// Port of the combat part of UpdateCameraHook and of FTBStartHook/FTBEndHook. The Windows mod reads
+// combat from the camera's flags; here it comes from the game's own combat telemetry events, so a
+// save loaded mid-combat isn't detected until the next combat change.
+void OnGameEvent(uint64_t name)
+{
+    State& state = GetState();
+    const bool auto_toggle = state.auto_toggle_movement_mode;
+    const int64_t now = NowMs();
+    if (name == g_telemetry.strings[TelemetryCalls::CombatStart]) {
+        state.in_combat = true;
+        state.last_combat_change_ms = now;
+        LOG_INFO("Combat started");
+        if (auto_toggle) {
+            state.SetMovementModeToggled(false);
+        }
+    } else if (name == g_telemetry.strings[TelemetryCalls::CombatEnd]) {
+        state.in_combat = false;
+        state.last_combat_change_ms = now;
+        LOG_INFO("Combat ended");
+        if (auto_toggle) {
+            state.SetMovementModeToggled(true);
+        }
+        if (state.walk_after_combat) {
+            state.walking_toggled = true;
+        }
+    }
+    if (name == g_telemetry.strings[TelemetryCalls::CombatStart] || name == g_telemetry.strings[TelemetryCalls::CombatEnd]) {
+        camera::UpdateCharacterModeCamera();  // the mode may not have changed, but combat did
+    } else if (name == g_telemetry.strings[TelemetryCalls::FtbStart]) {
+        LOG_INFO("Turn-based mode started");
+        if (auto_toggle) {
+            state.SetMovementModeToggled(false);
+        }
+    } else if (name == g_telemetry.strings[TelemetryCalls::FtbEnd]) {
+        LOG_INFO("Turn-based mode ended");
+        // Turn-based mode also ends when combat starts; don't switch back to Character mode then.
+        if (auto_toggle && now - state.last_combat_change_ms > 500) {
+            state.SetMovementModeToggled(true);
+        }
+    }
+}
+
+RegisterPair LogTelemetryHook(uint64_t a0, uint64_t a1, uint64_t name, uint64_t a3, uint64_t a4, uint64_t a5)
+{
+    const RegisterPair result = g_log_telemetry(a0, a1, name, a3, a4, a5);
+    OnGameEvent(name);
+    return result;
+}
+
+// Optional feature: on failure it logs a warning and the rest keeps working.
+void InstallGameEvents(const mem::MainExecutable& exe)
+{
+    std::string error;
+    if (!FindTelemetryCalls(reinterpret_cast<const uint8_t*>(exe.code.start), exe.code.size, exe.code.start,
+            reinterpret_cast<const uint8_t*>(exe.rodata.start), exe.rodata.size, exe.rodata.start, g_telemetry,
+            error)) {
+        LOG_WARN("Movement mode won't follow combat and turn-based mode: %s", error.c_str());
+        return;
+    }
+    void* stub = mem::MakeJumpStub(exe.code.start, reinterpret_cast<const void*>(&LogTelemetryHook));
+    if (!stub) {
+        LOG_WARN("Movement mode won't follow combat and turn-based mode: could not allocate a jump stub");
+        return;
+    }
+    g_log_telemetry = reinterpret_cast<LogTelemetryFn>(g_telemetry.log_telemetry);
+    for (const uintptr_t call : g_telemetry.calls) {
+        mem::RedirectCall(call, stub);
+    }
+    LOG_INFO("Combat and turn-based mode events hooked (LogTelemetry %#lx)",
+        static_cast<unsigned long>(g_telemetry.log_telemetry - exe.load_bias));
 }
 
 void OnMovementModeChanged(State& state)
@@ -100,6 +196,7 @@ void OnMovementModeChanged(State& state)
     if (character) {
         state.frames_to_center_camera = kFramesToCenterCamera;
     }
+    camera::UpdateCharacterModeCamera();
     LOG_INFO("Movement mode: %s", character ? "character" : "camera");
 }
 
@@ -230,6 +327,8 @@ bool Install()
     if (const uintptr_t execute_camera_command = InstallCameraBlock(exe)) {
         camera::Install(exe, execute_camera_command);
     }
+    camera::InstallCharacterModeCamera(exe, game.is_in_controller_mode);
+    InstallGameEvents(exe);
     return true;
 }
 
@@ -246,10 +345,17 @@ __attribute__((constructor)) void OnLibraryLoad()
 
     SetSettingsPath(dir + "/BG3WASD.toml");
     ReloadSettings();
+    WatchSettingsFile();
 
     if (!Install()) {
         LOG_ERROR("Mod disabled: unsupported game build or patch failure");
         return;
+    }
+    // The game hasn't read its key bindings yet, so they can be patched on disk now.
+    const inputconfig::Result bindings = inputconfig::PatchAllProfiles();
+    if (bindings.ok) {
+        input::SetMovementKeys(bindings.forward_keys, bindings.backward_keys);
+        GetState().rotate_keys_include_lmb = bindings.rotate_includes_left_click;
     }
     input::Enable();
     LOG_INFO("WASD movement enabled");

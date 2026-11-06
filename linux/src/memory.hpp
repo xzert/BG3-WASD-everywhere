@@ -16,6 +16,7 @@ struct Segment {
 struct MainExecutable {
     uintptr_t load_bias = 0;  // runtime address minus the address in the ELF file
     Segment code;             // the executable PT_LOAD segment
+    Segment rodata;           // the largest read-only PT_LOAD segment (holds .rodata)
     Segment data[4];          // writable PT_LOAD segments
     int data_count = 0;
     Segment relro;            // part of the data made read-only after relocation (PT_GNU_RELRO)
@@ -35,6 +36,10 @@ uintptr_t RedirectCall(uintptr_t site, const void* stub);
 
 // Replaces the 6-byte `call qword ptr [rax+disp32]` at `site` with `call stub ; nop`.
 bool ReplaceVirtualCall(uintptr_t site, const void* stub);
+
+// Writes two bytes of code with a single store, so code another thread is running sees either the
+// old or the new instruction. Fails if the bytes would straddle a cache line.
+bool WriteCodeAtomic16(uintptr_t address, uint16_t value);
 
 // 8-byte aligned slots in the game's data segments that hold `value`, e.g. vtable entries.
 std::vector<uintptr_t> FindPointerSlots(const MainExecutable& exe, uintptr_t value);

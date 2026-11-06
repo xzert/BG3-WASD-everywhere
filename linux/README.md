@@ -27,22 +27,45 @@ an error and stays inactive.
   - `centered`: the cursor is held in the center of the screen. It still shows the vanilla rotation
     icon, not a crosshair.
   - `vanilla`: the game's own behavior.
+- Movement mode follows combat and forced turn-based mode (FTB): Camera mode when they start,
+  Character mode when they end (`AutoToggleMovementMode`, `SwitchToWalkingAfterCombat`). The Windows
+  mod reads combat from the camera; this port uses the game's own `combat_start`, `combat_end`,
+  `ftb_start` and `ftb_end` telemetry events. A save loaded in the middle of a fight is noticed only
+  at the next start or end.
+- Rotate + left click moves forward (`RotatePlusLeftclickMovesForward`).
+- In Character mode outside combat, moving the cursor to the screen edge doesn't pan the camera, and
+  the chase camera keeps the character (`BlockEdgePanningHook` and
+  `PreventLosingChaseCamTargetHook`). On Linux, `GetViewport` is inlined. The mod rewrites the `jne`
+  that skips edge panning with a gamepad into `nop ; jmp`, a two-byte change made with one store,
+  and switches it back when the mode or combat changes.
+- `BG3WASD.toml` is reloaded about a second after it changes.
+- Movement keys are bound automatically, like `InputconfigPatcher` on Windows.
+  - What it does: binds `CharacterMoveForward/Backward/Left/Right` to the keys of
+    `CameraForward/Backward/Left/Right` (or the defaults), drops extra `key:unknown` entries, and, when
+    right click rotates the camera, binds its modifier variants and moves Ping off right click.
+  - Where: `inputconfig_p1.json` of every player profile in
+    `~/.local/share/Larian Studios/Baldur's Gate 3/PlayerProfiles/`.
+  - When: once at startup, before the game reads the file. A file that's already right is not
+    rewritten. Before the first change, the original is saved as `inputconfig_p1.json.bg3wasd.bak`.
+  - Rebinding: the Windows mod re-patches after keybinding changes in the game's menu; here, restart
+    the game.
+  - Check offline: `./build/selftest --inputconfig <file> <output>`.
 
 ## Not ported yet
 
-- No automatic switch to Camera mode in combat (`UpdateCameraHook`). In combat, press
-  `ToggleMovementMode` to pan the camera with the movement keys.
 - From the camera rotation features:
   - `ToggleCameraRotation` (mouselook without holding a button);
   - automatically turning rotation off in menus, dialogs, the loot window and photo mode;
-  - blocking edge panning in Character mode;
-  - Rotate + left click = forward;
   - the crosshair icon for `centered`.
-- No inputconfig patching. `CharacterMoveForward`, `CharacterMoveBackward`, `CharacterMoveLeft` and
-  `CharacterMoveRight` must already be bound to keys in
-  `~/.local/share/Larian Studios/Baldur's Gate 3/PlayerProfiles/<profile>/inputconfig_p1.json`.
 - Hotkeys also fire in menus and text fields.
-- No camera rotation features, interact-move blocker, unclickable character, or FTB toggling.
+- No interact-move blocker and no unclickable active character.
+
+## Known issues
+
+- With the game's Edge Panning option on, moving the cursor to the screen edge doesn't pan the camera
+  in Camera mode either. In that mode the mod has restored the game's original code (the log shows
+  `Edge panning allowed (code now 0f 85)`), so the cause is elsewhere and not yet known. Panning with
+  the movement keys works.
 
 ## Build
 
