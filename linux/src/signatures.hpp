@@ -47,10 +47,11 @@ bool FindRotationAddresses(const uint8_t* text, size_t size, uintptr_t text_addr
     uintptr_t execute_camera_command, RotationAddresses& out, std::string& error);
 
 // The game logs telemetry events as LogTelemetry(rdi, rsi, const char* name in rdx). The calls for
-// these events tell the mod when combat and forced turn-based mode (FTB) start and end.
+// these events tell the mod when combat, forced turn-based mode (FTB) and dialogs start and end.
 struct TelemetryCalls {
-    enum Event { CombatStart, CombatEnd, FtbStart, FtbEnd, kEventCount };
-    static constexpr const char* kNames[kEventCount] = { "combat_start", "combat_end", "ftb_start", "ftb_end" };
+    enum Event { CombatStart, CombatEnd, FtbStart, FtbEnd, DialogStart, DialogEnd, kEventCount };
+    static constexpr const char* kNames[kEventCount] = { "combat_start", "combat_end", "ftb_start", "ftb_end",
+        "dialog_start", "dialog_end" };
 
     uintptr_t log_telemetry = 0;
     uintptr_t calls[kEventCount] = {};    // `call LogTelemetry` right after `lea rdx, [name]`

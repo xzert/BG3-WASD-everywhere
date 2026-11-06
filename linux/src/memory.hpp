@@ -37,6 +37,14 @@ uintptr_t RedirectCall(uintptr_t site, const void* stub);
 // Replaces the 6-byte `call qword ptr [rax+disp32]` at `site` with `call stub ; nop`.
 bool ReplaceVirtualCall(uintptr_t site, const void* stub);
 
+// Hooks a function at its entry: its first `length` bytes must equal `expected` and be whole
+// instructions that don't depend on their address. They are moved into a trampoline that then
+// continues in the function; the entry jumps to `hook`. `*original` receives the trampoline (call it
+// as the original function) before the entry is patched. Returns false if the bytes differ or
+// memory can't be allocated; UnhookEntry puts the original bytes back.
+bool HookEntry(uintptr_t function, const uint8_t* expected, size_t length, const void* hook, void** original);
+bool UnhookEntry(uintptr_t function, const uint8_t* expected, size_t length);
+
 // Writes two bytes of code with a single store, so code another thread is running sees either the
 // old or the new instruction. Fails if the bytes would straddle a cache line.
 bool WriteCodeAtomic16(uintptr_t address, uint16_t value);

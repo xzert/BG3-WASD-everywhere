@@ -2,10 +2,12 @@
 
 #include <dlfcn.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstring>
 #include <mutex>
+#include <vector>
 
 #include "log.hpp"
 #include "signatures.hpp"
@@ -29,6 +31,9 @@ struct Sdl {
     int (*PushEvent)(void*) = nullptr;
     uint32_t (*GetTicks)() = nullptr;
     void* (*GetKeyboardFocus)() = nullptr;
+    uint32_t (*GetWindowID)(void*) = nullptr;
+    int32_t (*GetKeyFromScancode)(int32_t) = nullptr;
+    int (*IsTextInputActive)() = nullptr;
 
     bool Load()
     {
@@ -40,7 +45,9 @@ struct Sdl {
                load(WarpMouseInWindow, "SDL_WarpMouseInWindow") & load(GetMouseState, "SDL_GetMouseState") &
                load(GetWindowSize, "SDL_GetWindowSize") & load(SetHint, "SDL_SetHint") &
                load(PushEvent, "SDL_PushEvent") & load(GetTicks, "SDL_GetTicks") &
-               load(GetKeyboardFocus, "SDL_GetKeyboardFocus");
+               load(GetKeyboardFocus, "SDL_GetKeyboardFocus") & load(GetWindowID, "SDL_GetWindowID") &
+               load(GetKeyFromScancode, "SDL_GetKeyFromScancode") &
+               load(IsTextInputActive, "SDL_IsTextInputActive");
     }
 } g_sdl;
 
@@ -220,6 +227,130 @@ Vec4 SetVirtualCursorPosHook(uint64_t self, uint64_t mouse, uint64_t a2, uint64_
     return position;
 }
 
+// Mouselook (ToggleCameraRotation). The Windows mod sends the rotate command to the camera's command
+// handler; this port pushes the rotate input (CameraToggleMouseRotate's binding) as an SDL event and
+// holds it, so the game's own input path starts the rotation.
+constexpr uint32_t kSdlKeyDownEvent = 0x300;
+constexpr uint32_t kSdlKeyUpEvent = 0x301;
+constexpr uint32_t kSdlMouseButtonDownEvent = 0x401;
+constexpr uint32_t kSdlMouseButtonUpEvent = 0x402;
+constexpr int kFramesToStartRotating = 3;
+constexpr int kMaxPressAttempts = 3;  // presses that don't start rotation before mouselook gives up
+
+std::atomic<bool> g_mouselook_on{ false };
+std::atomic<bool> g_in_dialog{ false };
+Input g_rotate_input{ true, 2 };  // the middle mouse button, the game's default
+// Main thread only:
+// Panels opened with their keys while mouselook was on. A function-local static: the constructor in
+// main.cpp that starts the mod can run before this file's static initializers.
+std::vector<int>& OpenPanels()
+{
+    static std::vector<int> panels;
+    return panels;
+}
+bool g_rotate_input_down = false;
+int g_frames_since_press = 0;
+int g_press_attempts = 0;
+
+void PushRotateInput(bool down)
+{
+    uint8_t event[kSdlEventSize] = {};
+    const uint32_t timestamp = g_sdl.GetTicks();
+    void* window = Window();
+    const uint32_t window_id = window ? g_sdl.GetWindowID(window) : 0;
+    std::memcpy(event + 4, &timestamp, sizeof timestamp);
+    std::memcpy(event + 8, &window_id, sizeof window_id);
+    if (g_rotate_input.mouse_button) {
+        const uint32_t type = down ? kSdlMouseButtonDownEvent : kSdlMouseButtonUpEvent;
+        int x = 0, y = 0;
+        g_sdl.GetMouseState(&x, &y);
+        std::memcpy(event, &type, sizeof type);
+        event[16] = static_cast<uint8_t>(g_rotate_input.code);  // button
+        event[17] = down ? 1 : 0;                               // state
+        event[18] = 1;                                          // clicks
+        std::memcpy(event + 20, &x, sizeof x);
+        std::memcpy(event + 24, &y, sizeof y);
+    } else {
+        const uint32_t type = down ? kSdlKeyDownEvent : kSdlKeyUpEvent;
+        const int32_t scancode = g_rotate_input.code;
+        const int32_t keycode = g_sdl.GetKeyFromScancode(scancode);
+        std::memcpy(event, &type, sizeof type);
+        event[12] = down ? 1 : 0;  // state
+        std::memcpy(event + 16, &scancode, sizeof scancode);
+        std::memcpy(event + 20, &keycode, sizeof keycode);
+    }
+    g_sdl.PushEvent(event);
+}
+
+// The game asks for the movement input every frame while the player can move freely, and stops in
+// menus, the pause menu, dialogs, loading screens and when the window loses focus. The Windows mod
+// tracks each of those with its own hooks; on Linux this one signal covers them.
+constexpr int64_t kNoMovementPollMs = 250;
+
+const char* MouselookPauseReason()
+{
+    if (g_in_dialog) {
+        return "dialog";
+    }
+    if (!OpenPanels().empty()) {
+        return "a panel is open";
+    }
+    if (g_sdl.IsTextInputActive()) {
+        return "text input";
+    }
+    if (NowMs() - GetState().last_movement_poll_ms > kNoMovementPollMs) {
+        return "the game isn't taking movement input (menu, pause, loading)";
+    }
+    return nullptr;
+}
+
+// Once per frame, main thread.
+void UpdateMouselook()
+{
+    if (!g_mouselook_on) {
+        OpenPanels().clear();
+    }
+    static const char* last_reason = nullptr;
+    const char* reason = g_mouselook_on ? MouselookPauseReason() : nullptr;
+    if (reason != last_reason) {
+        if (reason) {
+            LOG_INFO("Mouselook paused: %s", reason);
+        } else if (g_mouselook_on) {
+            LOG_INFO("Mouselook resumed");
+        }
+        last_reason = reason;
+    }
+    const bool want = g_mouselook_on && !reason;
+    if (!want) {
+        if (g_rotate_input_down) {
+            PushRotateInput(false);
+            g_rotate_input_down = false;
+        }
+        g_press_attempts = 0;
+        return;
+    }
+    if (g_rotating) {
+        g_press_attempts = 0;
+        return;
+    }
+    // Not rotating: the press hasn't reached the camera yet, the UI took it, or the player pressed and
+    // released the rotate input. Release, then press again, a few times at most.
+    if (g_rotate_input_down) {
+        if (++g_frames_since_press >= kFramesToStartRotating) {
+            PushRotateInput(false);
+            g_rotate_input_down = false;
+        }
+    } else if (g_press_attempts < kMaxPressAttempts) {
+        PushRotateInput(true);
+        g_rotate_input_down = true;
+        g_frames_since_press = 0;
+        ++g_press_attempts;
+    } else {
+        g_mouselook_on = false;
+        LOG_WARN("Mouselook off: the game didn't start rotating after %d presses", kMaxPressAttempts);
+    }
+}
+
 // Character mode camera.
 constexpr uint16_t kJneOpcode = 0x850F;    // bytes 0F 85: jne rel32
 constexpr uint16_t kNopJmpOpcode = 0xE990;  // bytes 90 E9: nop ; jmp rel32, same target
@@ -324,6 +455,42 @@ void SetWindow(void* window) { g_window = window; }
 
 bool IsRotating() { return g_rotating; }
 
+void SetMouselook(bool on)
+{
+    if (g_mouselook_on.exchange(on) != on) {
+        LOG_INFO("Mouselook %s", on ? "on" : "off");
+    }
+}
+
+void ToggleMouselook()
+{
+    if (g_mouselook_on && !OpenPanels().empty()) {
+        OpenPanels().clear();  // paused for a panel: the key resumes instead of turning it off
+        return;
+    }
+    SetMouselook(!g_mouselook_on);
+}
+
+void OnPanelKey(int key)
+{
+    if (!g_mouselook_on) {
+        return;
+    }
+    std::vector<int>& panels = OpenPanels();
+    const auto open = std::find(panels.begin(), panels.end(), key);
+    if (open != panels.end()) {
+        panels.erase(open);
+    } else {
+        panels.push_back(key);
+    }
+}
+
+void OnCloseAllPanels() { OpenPanels().clear(); }
+
+void SetRotateInput(bool mouse_button, int code) { g_rotate_input = { mouse_button, code }; }
+
+void SetDialogActive(bool active) { g_in_dialog = active; }
+
 void OnInputEvent(bool mouse_button, int code, bool down)
 {
     if (!g_installed) {
@@ -344,6 +511,7 @@ void OnFrameStart()
     if (!g_installed) {
         return;
     }
+    UpdateMouselook();
     std::lock_guard lock(g_rotation.mutex);
     if (g_rotation.should_override_cursor) {
         if (!g_rotation.overridden_last_frame) {
@@ -387,16 +555,11 @@ bool Install(const mem::MainExecutable& exe, uintptr_t execute_camera_command)
         return false;
     }
 
-    void* push_stub = mem::MakeJumpStub(exe.code.start, reinterpret_cast<const void*>(&CursorPushHook));
-    void* pop_stub = mem::MakeJumpStub(exe.code.start, reinterpret_cast<const void*>(&CursorPopHook));
     void* cursor_stub = mem::MakeJumpStub(exe.code.start, reinterpret_cast<const void*>(&SetVirtualCursorPosHook));
-    if (!push_stub || !pop_stub || !cursor_stub) {
-        LOG_WARN("Camera rotation features off: could not allocate jump stubs");
+    if (!cursor_stub) {
+        LOG_WARN("Camera rotation features off: could not allocate a jump stub");
         return false;
     }
-
-    g_cursor_push = reinterpret_cast<CursorFn>(rotation.cursor_push);
-    g_cursor_pop = reinterpret_cast<CursorFn>(rotation.cursor_pop);
     g_virtual_cursor_slot = rotation.set_virtual_cursor_slot;
     // Activate the frame logic first: once a hook is in, rotation can start at any time.
     g_installed = true;
@@ -406,15 +569,26 @@ bool Install(const mem::MainExecutable& exe, uintptr_t execute_camera_command)
         g_installed = false;
         return false;
     }
-    for (const uintptr_t call : rotation.push_calls) {
-        mem::RedirectCall(call, push_stub);
+
+    // The cursor manager's push and pop are hooked at their entries, so cursor changes the UI makes
+    // through function pointers are seen too. Neither prologue depends on its address.
+    static constexpr uint8_t kPushEntry[] = { 0x55, 0x53, 0x50, 0x48, 0x89, 0xF8 };       // push rbp, rbx, rax; mov rax, rdi
+    static constexpr uint8_t kPopEntry[] = { 0x48, 0x8B, 0x47, 0x30, 0x48, 0x85, 0xC0 };  // mov rax, [rdi+0x30]; test rax, rax
+    if (!mem::HookEntry(rotation.cursor_push, kPushEntry, sizeof kPushEntry,
+            reinterpret_cast<const void*>(&CursorPushHook), reinterpret_cast<void**>(&g_cursor_push))) {
+        LOG_WARN("Rotation cursor unchanged: could not hook the cursor push");
+        return false;
     }
-    for (const uintptr_t call : rotation.pop_calls) {
-        mem::RedirectCall(call, pop_stub);
+    if (!mem::HookEntry(rotation.cursor_pop, kPopEntry, sizeof kPopEntry, reinterpret_cast<const void*>(&CursorPopHook),
+            reinterpret_cast<void**>(&g_cursor_pop))) {
+        // A rotation start without its stop would leave the cursor hidden.
+        mem::UnhookEntry(rotation.cursor_push, kPushEntry, sizeof kPushEntry);
+        LOG_WARN("Rotation cursor unchanged: could not hook the cursor pop");
+        return false;
     }
-    LOG_INFO("Rotation cursor push %#lx (%zu calls), pop %#lx (%zu calls), SetVirtualCursorPos call %#lx slot %#x",
-        file_address(rotation.cursor_push), rotation.push_calls.size(), file_address(rotation.cursor_pop),
-        rotation.pop_calls.size(), file_address(rotation.set_virtual_cursor_call), rotation.set_virtual_cursor_slot);
+    LOG_INFO("Rotation cursor push %#lx and pop %#lx hooked at entry, SetVirtualCursorPos call %#lx slot %#x",
+        file_address(rotation.cursor_push), file_address(rotation.cursor_pop),
+        file_address(rotation.set_virtual_cursor_call), rotation.set_virtual_cursor_slot);
     return true;
 }
 

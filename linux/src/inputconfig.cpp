@@ -406,7 +406,7 @@ std::string ReadFile(const std::string& path, bool& exists)
 
 bool WriteFileAtomically(const std::string& path, const std::string& text, mode_t mode, std::string& error)
 {
-    const std::string temp = path + ".bg3wasd.tmp";
+    const std::string temp = path + ".bg3-wasd-everywhere.tmp";
     const int fd = open(temp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, mode);
     if (fd < 0) {
         error = std::strerror(errno);
@@ -439,7 +439,7 @@ Result PatchFile(const std::string& path)
 
     struct stat info {};
     const mode_t mode = exists && stat(path.c_str(), &info) == 0 ? (info.st_mode & 07777) : 0640;
-    const std::string backup = path + ".bg3wasd.bak";
+    const std::string backup = path + ".bg3-wasd-everywhere.bak";
     if (exists && access(backup.c_str(), F_OK) != 0) {
         std::string ignored;
         WriteFileAtomically(backup, in, mode, ignored);
@@ -486,6 +486,7 @@ Result PatchText(const std::string& in, std::string& out)
     result.forward_keys = KeyboardAndMouseKeys(Find(entries, "CharacterMoveForward"));
     result.backward_keys = KeyboardAndMouseKeys(Find(entries, "CharacterMoveBackward"));
     if (const Entry* rotate = Find(entries, "CameraToggleMouseRotate"); rotate && rotate->string_array) {
+        result.rotate_keys = rotate->values;
         for (const std::string& key : rotate->values) {
             result.rotate_includes_left_click |= key.find("mouse:left") != std::string::npos;
         }

@@ -38,8 +38,8 @@ port has not been tested on Steam Deck yet.
 | Movement keys don't pan the camera in Character mode | ✅ | ✅ | — |
 | Camera rotation with an invisible or centered cursor | ✅ | ✅ ¹ | — |
 | Automatic Camera mode in combat | ✅ | ✅ ⁴ | — |
-| `ToggleCameraRotation` (mouselook without holding a button) | ✅ | — | — |
-| Rotation turns off in menus, dialogs, loot and photo mode | ✅ | — ² | — |
+| `ToggleCameraRotation` (mouselook without holding a button) | ✅ | ✅ | — |
+| Rotation turns off in menus, dialogs, loot and photo mode | ✅ | ✅ ² | — |
 | No edge panning in Character mode | ✅ | ✅ | — |
 | Rotate + left click moves forward | ✅ | ✅ | — |
 | Unclickable active character and camera occluders | ✅ | — | — |
@@ -51,7 +51,11 @@ port has not been tested on Steam Deck yet.
 Notes on the Linux column:
 
 - ¹ `centered` shows the game's rotation icon instead of a crosshair.
-- ² The cursor comes back when you release the rotate button.
+- ² The Esc menu, dialogs, loading screens and text fields pause mouselook by themselves.
+  - Panels such as the inventory, map or journal pause it when you open them with their hotkeys
+    (`MouselookPauseKeys`).
+  - Mouselook resumes when you close the panel with the same key or Esc, or press the mouselook key.
+  - The loot window and photo mode aren't detected.
 - ³ Bound when the game starts. If you rebind the camera keys in the game's menu, restart the game
   to apply them to movement.
 - ⁴ Combat is detected from the game's combat start and end events. If you load a save in the
@@ -60,41 +64,32 @@ Notes on the Linux column:
 
 ### Install on Linux
 
-There are no prebuilt releases yet, so build the library first. You need `g++` with C++20 support
-and `make`.
-
-1. Build:
-
-   ```bash
-   cd linux && make
-   ```
-
-   This creates `linux/build/libbg3wasd.so` and the default config `linux/build/BG3WASD.toml`.
-
-2. Check that your game version is supported:
-
-   ```bash
-   ./build/selftest ~/.local/share/Steam/steamapps/common/"Baldurs Gate 3"/bin/bg3
-   ```
-
-   It should print the addresses it found. `FAILED` means your game version isn't supported yet.
-
-3. In Steam, open Baldur's Gate 3 → Properties → General → Launch Options and enter:
+1. Download `bg3-wasd-everywhere-linux-<version>.tar.gz` from
+   [Releases](https://github.com/xzert/BG3-WASD-everywhere/releases) and extract it to a folder whose
+   path has no spaces, for example `~/bg3-wasd-everywhere`.
+2. In Steam, open Baldur's Gate 3 → Properties → General → Launch Options and enter, with your
+   path:
 
    ```
-   LD_PRELOAD="/absolute/path/to/linux/build/libbg3wasd.so:$LD_PRELOAD" %command%
+   LD_PRELOAD="/home/you/bg3-wasd-everywhere/libbg3-wasd-everywhere.so:$LD_PRELOAD" %command%
    ```
 
-   The path must not contain spaces.
+The archive also contains these steps in `INSTALL.md`.
+
+To build from source instead, run `make` in `linux/` and point `LD_PRELOAD` at
+`linux/build/libbg3-wasd-everywhere.so`; see [linux/README.md](linux/README.md#build). A library
+built this way needs your system's glibc version. The release archive is built in the Steam Runtime
+SDK and needs only the runtime's glibc 2.31.
 
 On start, the mod binds character movement to your camera movement keys (W/A/S/D and the arrows by
 default). It does this in `inputconfig_p1.json` of every player profile and keeps the original as
-`inputconfig_p1.json.bg3wasd.bak`.
+`inputconfig_p1.json.bg3-wasd-everywhere.bak`.
 
-To check that it works, start the game and look at `~/.local/state/BG3WASD/BG3WASD.log`. It should
-contain `WASD movement enabled`. Caps Lock switches between Character and Camera movement, and
-Shift+W toggles autoforward. Hotkeys, walking speed and the rotation cursor are set in
-`BG3WASD.toml` next to the library.
+To check that it works, start the game and look at
+`~/.local/state/bg3-wasd-everywhere/bg3-wasd-everywhere.log`. It should contain
+`WASD movement enabled`. Caps Lock switches between Character and Camera movement, and Shift+W
+toggles autoforward. Hotkeys, walking speed and the rotation cursor are set in
+`bg3-wasd-everywhere.toml` next to the library.
 
 More details, including how the port finds its way around the game's code, are in
 [linux/README.md](linux/README.md).

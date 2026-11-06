@@ -1,0 +1,10 @@
+/* The library exports only the SDL functions it interposes. Everything else stays local, including
+   the libstdc++ template code that some compilers emit into it: the library is preloaded, so an
+   exported copy would replace the one in libstdc++ for the whole game process. */
+{
+    global:
+        SDL_PollEvent;
+        SDL_GetWindowGrab;
+    local:
+        *;
+};

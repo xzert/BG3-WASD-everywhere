@@ -20,7 +20,7 @@ void Open(const char* path)
     std::lock_guard lock(g_mutex);
     g_file = std::fopen(path, "w");
     if (!g_file) {
-        std::fprintf(stderr, "BG3WASD: cannot open log %s: %s\n", path, std::strerror(errno));
+        std::fprintf(stderr, "BG3 WASD Everywhere: cannot open log %s: %s\n", path, std::strerror(errno));
     }
 }
 

@@ -27,6 +27,7 @@ constexpr size_t kKeyScancodeOffset = 16;
 constexpr size_t kMouseButtonOffset = 16;
 
 constexpr int kLCtrl = 224, kLShift = 225, kLAlt = 226, kRCtrl = 228, kRShift = 229, kRAlt = 230;
+constexpr int kEscape = 41;
 
 struct Key {
     enum Kind : uint8_t { Scancode, MouseButton, Shift, Ctrl, Alt } kind;
@@ -41,6 +42,8 @@ enum Command {
     ToggleWalkspeed,
     HoldWalkspeed,
     ReloadConfig,
+    ToggleCameraRotation,
+    MouselookPause,
     Forward,
     Backward,
     kCommandCount
@@ -57,9 +60,20 @@ constexpr NamedKey kMouseButtons[] = {
     { "mouse:left", 1 }, { "mouse:middle", 2 }, { "mouse:right", 3 }, { "mouse:x1", 4 }, { "mouse:x2", 5 }
 };
 
-std::vector<Combo> g_bindings[kCommandCount];
-std::string g_forward_keys = "key:w,key:up";
-std::string g_backward_keys = "key:s,key:down";
+// A function-local static: the constructor in main.cpp that starts the mod can run before this
+// file's static initializers, which would then reset the bindings it set.
+struct Hotkeys {
+    std::vector<Combo> bindings[kCommandCount];
+    std::string forward_keys = "key:w,key:up";
+    std::string backward_keys = "key:s,key:down";
+};
+
+Hotkeys& GetHotkeys()
+{
+    static Hotkeys hotkeys;
+    return hotkeys;
+}
+
 bool g_scancode_down[512] = {};
 bool g_mouse_down[8] = {};
 std::atomic<bool> g_enabled{ false };
@@ -170,7 +184,7 @@ bool IsDown(const Key& key)
 // keys must be held, and a held modifier that the combo doesn't mention blocks the match.
 bool Matches(Command command, const Key& event_key)
 {
-    for (const Combo& combo : g_bindings[command]) {
+    for (const Combo& combo : GetHotkeys().bindings[command]) {
         const Key& trigger = combo.back();
         if (trigger.kind != event_key.kind || trigger.code != event_key.code) {
             continue;
@@ -235,6 +249,19 @@ void OnKey(const Key& key, bool down)
     if (pressed(ReloadConfig)) {
         ReloadSettings();
     }
+
+    // Panels (inventory, map, ...) keep the game taking movement input, so mouselook can't see them;
+    // their keys pause it instead. Esc closes panels.
+    if (pressed(MouselookPause)) {
+        camera::OnPanelKey(key.kind == Key::MouseButton ? -key.code : key.code);
+    }
+    if (down && key.kind == Key::Scancode && key.code == kEscape) {
+        camera::OnCloseAllPanels();
+    }
+
+    if (pressed(ToggleCameraRotation)) {
+        camera::ToggleMouselook();
+    }
 }
 
 // The game starts and stops SDL text input itself, so this is true while a text field has focus.
@@ -288,14 +315,17 @@ void OnSdlEvent(const void* event)
 
 void SetBindings(const Settings& s)
 {
-    g_bindings[ToggleMovementMode] = ParseBinding(s.toggle_movement_mode, "ToggleMovementMode");
-    g_bindings[HoldMovementMode] = ParseBinding(s.hold_movement_mode, "HoldMovementMode");
-    g_bindings[ToggleAutoforward] = ParseBinding(s.toggle_autoforward, "ToggleAutoforward");
-    g_bindings[ToggleWalkspeed] = ParseBinding(s.toggle_walkspeed, "ToggleWalkspeed");
-    g_bindings[HoldWalkspeed] = ParseBinding(s.hold_walkspeed, "HoldWalkspeed");
-    g_bindings[ReloadConfig] = ParseBinding(s.reload_config, "ReloadConfig");
-    g_bindings[Forward] = ParseBinding(g_forward_keys, "CharacterMoveForward");
-    g_bindings[Backward] = ParseBinding(g_backward_keys, "CharacterMoveBackward");
+    Hotkeys& hotkeys = GetHotkeys();
+    hotkeys.bindings[ToggleMovementMode] = ParseBinding(s.toggle_movement_mode, "ToggleMovementMode");
+    hotkeys.bindings[HoldMovementMode] = ParseBinding(s.hold_movement_mode, "HoldMovementMode");
+    hotkeys.bindings[ToggleAutoforward] = ParseBinding(s.toggle_autoforward, "ToggleAutoforward");
+    hotkeys.bindings[ToggleWalkspeed] = ParseBinding(s.toggle_walkspeed, "ToggleWalkspeed");
+    hotkeys.bindings[HoldWalkspeed] = ParseBinding(s.hold_walkspeed, "HoldWalkspeed");
+    hotkeys.bindings[ReloadConfig] = ParseBinding(s.reload_config, "ReloadConfig");
+    hotkeys.bindings[ToggleCameraRotation] = ParseBinding(s.toggle_camerarotation, "ToggleCameraRotation");
+    hotkeys.bindings[MouselookPause] = ParseBinding(s.mouselook_pause_keys, "MouselookPauseKeys");
+    hotkeys.bindings[Forward] = ParseBinding(hotkeys.forward_keys, "CharacterMoveForward");
+    hotkeys.bindings[Backward] = ParseBinding(hotkeys.backward_keys, "CharacterMoveBackward");
 }
 
 void SetMovementKeys(const std::vector<std::string>& forward, const std::vector<std::string>& backward)
@@ -307,14 +337,26 @@ void SetMovementKeys(const std::vector<std::string>& forward, const std::vector<
         }
         return joined;
     };
+    Hotkeys& hotkeys = GetHotkeys();
     if (!forward.empty()) {
-        g_forward_keys = join(forward);
+        hotkeys.forward_keys = join(forward);
     }
     if (!backward.empty()) {
-        g_backward_keys = join(backward);
+        hotkeys.backward_keys = join(backward);
     }
-    g_bindings[Forward] = ParseBinding(g_forward_keys, "CharacterMoveForward");
-    g_bindings[Backward] = ParseBinding(g_backward_keys, "CharacterMoveBackward");
+    hotkeys.bindings[Forward] = ParseBinding(hotkeys.forward_keys, "CharacterMoveForward");
+    hotkeys.bindings[Backward] = ParseBinding(hotkeys.backward_keys, "CharacterMoveBackward");
+}
+
+bool LookupKey(const std::string& name, bool& mouse_button, int& code)
+{
+    Key key{};
+    if (!ParseKey(name, key) || (key.kind != Key::Scancode && key.kind != Key::MouseButton)) {
+        return false;
+    }
+    mouse_button = key.kind == Key::MouseButton;
+    code = key.code;
+    return true;
 }
 
 void Enable() { g_enabled = true; }

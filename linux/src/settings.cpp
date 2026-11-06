@@ -19,7 +19,14 @@
 namespace wasd {
 namespace {
 
-std::string g_path;
+// A function-local static: the constructor in main.cpp that starts the mod can run before this
+// file's static initializers, which would then reset the path it set.
+std::string& SettingsPath()
+{
+    static std::string path;
+    return path;
+}
+
 bool g_loaded_once = false;
 std::atomic<bool> g_reload_requested{ false };
 
@@ -98,6 +105,13 @@ bool ParseSettingsFile(const std::string& path, Settings& s)
             s.hold_walkspeed = value;
         } else if (key == "ReloadConfig") {
             s.reload_config = value;
+        } else if (key == "ToggleCameraRotation") {
+            s.toggle_camerarotation = value;
+        } else if (key == "MouselookPauseKeys") {
+            s.mouselook_pause_keys = value;
+        } else if (key == "TogglingMovementModeAlsoTogglesCameraRotation") {
+            s.toggling_movement_mode_also_toggles_camera_rotation =
+                ParseBool(value, s.toggling_movement_mode_also_toggles_camera_rotation);
         } else if (key == "WalkSpeed") {
             char* end = nullptr;
             const float speed = std::strtof(value.c_str(), &end);
@@ -123,15 +137,16 @@ bool ParseSettingsFile(const std::string& path, Settings& s)
     return true;
 }
 
-void SetSettingsPath(std::string path) { g_path = std::move(path); }
+void SetSettingsPath(std::string path) { SettingsPath() = std::move(path); }
 
 bool TakeReloadRequest() { return g_reload_requested.exchange(false); }
 
 void WatchSettingsFile()
 {
-    const auto slash = g_path.rfind('/');
-    const std::string dir = slash == std::string::npos ? "." : g_path.substr(0, slash);
-    const std::string name = slash == std::string::npos ? g_path : g_path.substr(slash + 1);
+    const std::string& path = SettingsPath();
+    const auto slash = path.rfind('/');
+    const std::string dir = slash == std::string::npos ? "." : path.substr(0, slash);
+    const std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
 
     const int fd = inotify_init1(IN_CLOEXEC);
     // Editors often save by writing a temporary file and renaming it, so watch the directory.
@@ -178,10 +193,11 @@ void WatchSettingsFile()
 void ReloadSettings()
 {
     Settings settings;
-    if (ParseSettingsFile(g_path, settings)) {
-        LOG_INFO("Config loaded from %s", g_path.c_str());
+    const std::string& path = SettingsPath();
+    if (ParseSettingsFile(path, settings)) {
+        LOG_INFO("Config loaded from %s", path.c_str());
     } else {
-        LOG_WARN("Could not read %s, using defaults", g_path.c_str());
+        LOG_WARN("Could not read %s, using defaults", path.c_str());
     }
     if (settings.walk_speed < 0.0f || settings.walk_speed > 1.0f) {
         LOG_WARN("WalkSpeed %.2f is outside [0, 1], clamping", settings.walk_speed);
@@ -193,6 +209,7 @@ void ReloadSettings()
     state.auto_toggle_movement_mode = settings.auto_toggle_movement_mode;
     state.walk_after_combat = settings.walk_after_combat;
     state.rotate_plus_lmb_is_forward = settings.rotate_plus_lmb_is_forward;
+    state.mode_toggles_mouselook = settings.toggling_movement_mode_also_toggles_camera_rotation;
     input::SetBindings(settings);
     camera::SetRotationCursors(camera::ParseRotationCursor(settings.rotation_cursor_in_character_mode),
         camera::ParseRotationCursor(settings.rotation_cursor_in_camera_mode));

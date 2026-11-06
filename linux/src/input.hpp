@@ -15,6 +15,9 @@ void SetBindings(const Settings& settings);
 // The game's own CharacterMoveForward/Backward keys, which cancel autoforward. Defaults: W/Up, S/Down.
 void SetMovementKeys(const std::vector<std::string>& forward, const std::vector<std::string>& backward);
 
+// "key:..." or "mouse:..." to an SDL scancode or mouse button.
+bool LookupKey(const std::string& name, bool& mouse_button, int& code);
+
 // Starts reacting to SDL events.
 void Enable();
 

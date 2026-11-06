@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 
 namespace wasd {
@@ -22,6 +23,10 @@ struct State {
     std::atomic<bool> walk_after_combat{ false };
     std::atomic<bool> rotate_plus_lmb_is_forward{ true };
     std::atomic<bool> rotate_keys_include_lmb{ false };  // from the game's key bindings
+    std::atomic<bool> mode_toggles_mouselook{ false };   // TogglingMovementModeAlsoTogglesCameraRotation
+
+    // When the game last asked for the movement input (it does so every frame while the player can move).
+    std::atomic<int64_t> last_movement_poll_ms{ 0 };
 
     std::atomic<bool> in_combat{ false };
     std::atomic<int64_t> last_combat_change_ms{ 0 };
@@ -39,5 +44,11 @@ struct State {
 };
 
 State& GetState();
+
+inline int64_t NowMs()
+{
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
 
 }  // namespace wasd

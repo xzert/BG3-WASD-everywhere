@@ -1,4 +1,4 @@
-// BG3WASD for the native Linux build of Baldur's Gate 3, loaded with LD_PRELOAD.
+// BG3 WASD Everywhere for the native Linux build of Baldur's Gate 3, loaded with LD_PRELOAD.
 // What is ported and what isn't: see linux/README.md.
 #include <dlfcn.h>
 #include <sys/stat.h>
@@ -41,6 +41,7 @@ Vec4 OverrideMovementInput(uint64_t controller, uint64_t command, uint64_t playe
     Vec4 value = g_get_input_value(controller, command, player_id, a3, a4, a5);
     const auto command_id = static_cast<uint32_t>(command);
     State& state = GetState();
+    state.last_movement_poll_ms = NowMs();
     if (state.IsInControllerMode()) {
         return value;  // leave gamepad input alone
     }
@@ -110,12 +111,6 @@ using LogTelemetryFn = RegisterPair (*)(uint64_t, uint64_t, uint64_t, uint64_t, 
 LogTelemetryFn g_log_telemetry = nullptr;
 TelemetryCalls g_telemetry;
 
-int64_t NowMs()
-{
-    using namespace std::chrono;
-    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
-}
-
 // Port of the combat part of UpdateCameraHook and of FTBStartHook/FTBEndHook. The Windows mod reads
 // combat from the camera's flags; here it comes from the game's own combat telemetry events, so a
 // save loaded mid-combat isn't detected until the next combat change.
@@ -155,6 +150,12 @@ void OnGameEvent(uint64_t name)
         if (auto_toggle && now - state.last_combat_change_ms > 500) {
             state.SetMovementModeToggled(true);
         }
+    } else if (name == g_telemetry.strings[TelemetryCalls::DialogStart]) {
+        LOG_INFO("Dialog started");
+        camera::SetDialogActive(true);
+    } else if (name == g_telemetry.strings[TelemetryCalls::DialogEnd]) {
+        LOG_INFO("Dialog ended");
+        camera::SetDialogActive(false);
     }
 }
 
@@ -195,6 +196,9 @@ void OnMovementModeChanged(State& state)
         state.frames_to_center_camera = kFramesToCenterCamera;
     }
     camera::UpdateCharacterModeCamera();
+    if (state.mode_toggles_mouselook) {
+        camera::SetMouselook(character);
+    }
     LOG_INFO("Movement mode: %s", character ? "character" : "camera");
 }
 
@@ -210,8 +214,12 @@ bool IsGameProcess()
     return name && std::strcmp(name + 1, "bg3") == 0;
 }
 
-// ${XDG_STATE_HOME:-~/.local/state}/BG3WASD/BG3WASD.log. Not next to the library: inside the
-// Steam Linux Runtime container, the directory of an LD_PRELOAD library is mounted read-only.
+// The base name of the config, the log and the log directory.
+constexpr char kFileStem[] = "bg3-wasd-everywhere";
+
+// ${XDG_STATE_HOME:-~/.local/state}/bg3-wasd-everywhere/bg3-wasd-everywhere.log. Not next to the
+// library: inside the Steam Linux Runtime container, the directory of an LD_PRELOAD library is
+// mounted read-only.
 std::string LogPath()
 {
     std::string dir;
@@ -220,14 +228,14 @@ std::string LogPath()
     } else if (const char* home = std::getenv("HOME"); home && *home) {
         dir = std::string(home) + "/.local/state";
     } else {
-        return "/tmp/BG3WASD.log";
+        return std::string("/tmp/") + kFileStem + ".log";
     }
-    dir += "/BG3WASD";
+    dir = dir + "/" + kFileStem;
     for (size_t slash = dir.find('/', 1); slash != std::string::npos; slash = dir.find('/', slash + 1)) {
         mkdir(dir.substr(0, slash).c_str(), 0755);
     }
     mkdir(dir.c_str(), 0755);
-    return dir + "/BG3WASD.log";
+    return dir + "/" + kFileStem + ".log";
 }
 
 std::string LibraryDirectory()
@@ -339,9 +347,9 @@ __attribute__((constructor)) void OnLibraryLoad()
     }
     const std::string dir = LibraryDirectory();
     log::Open(LogPath().c_str());
-    LOG_INFO("BG3WASD for Linux %s, pid %d", BG3WASD_VERSION, static_cast<int>(getpid()));
+    LOG_INFO("BG3 WASD Everywhere %s for Linux, pid %d", BG3WASD_VERSION, static_cast<int>(getpid()));
 
-    SetSettingsPath(dir + "/BG3WASD.toml");
+    SetSettingsPath(dir + "/" + kFileStem + ".toml");
     ReloadSettings();
     WatchSettingsFile();
 
@@ -354,6 +362,22 @@ __attribute__((constructor)) void OnLibraryLoad()
     if (bindings.ok) {
         input::SetMovementKeys(bindings.forward_keys, bindings.backward_keys);
         GetState().rotate_keys_include_lmb = bindings.rotate_includes_left_click;
+    }
+    // Mouselook holds down the first plain binding of CameraToggleMouseRotate (no modifiers).
+    std::string rotate_input = "mouse:middle";  // the game's default
+    for (const std::string& key : bindings.rotate_keys) {
+        if (key.find('+') == std::string::npos && key != "mouse:left") {
+            rotate_input = key;
+            break;
+        }
+    }
+    bool rotate_is_mouse_button = false;
+    int rotate_code = 0;
+    if (input::LookupKey(rotate_input, rotate_is_mouse_button, rotate_code)) {
+        camera::SetRotateInput(rotate_is_mouse_button, rotate_code);
+        LOG_INFO("Mouselook holds %s", rotate_input.c_str());
+    } else {
+        LOG_WARN("Mouselook can't hold \"%s\"; using the middle mouse button", rotate_input.c_str());
     }
     input::Enable();
     LOG_INFO("WASD movement enabled");

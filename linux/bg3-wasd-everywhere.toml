@@ -1,0 +1,139 @@
+# Settings for BG3 WASD Everywhere, the Linux port. The mod reloads this file about a second
+# after you save it.
+
+[ModHotkeys]
+# For the names of all available keys, see the bottom of this config file.
+# Letter, digit and symbol keys are physical key positions, named after the US QWERTY layout. On an
+# AZERTY keyboard, key:w is the key labeled Z, so the defaults work on any layout.
+
+ToggleMovementMode = "key:capslock"
+# Key that toggles between Character and Camera movement mode.
+
+HoldMovementMode = ""
+# Switch between Character and Camera movement mode while you hold this key.
+
+ToggleCameraRotation = ""
+# Toggles the camera rotation to enable full mouselook.
+
+ToggleAutoforward = "shift+key:w"
+# Lets you move forward without holding Forward.
+
+ToggleWalkspeed = ""
+# Toggles between walking and jogging movespeed.
+
+HoldWalkspeed = ""
+# When you are jogging, holding this key will make you walk.
+# If you are walking, holding this key will make you jog.
+
+ReloadConfig = ""
+# Reloads this file. Usually not needed: the mod reloads it about a second after you save it.
+
+
+[CameraRotation]
+
+CharacterMovementRotationCursor = "invisible"
+# Defines the behavior of the mouse cursor during camera rotation in Character movement mode.
+# Option 1: "invisible"
+#            The cursor is invisible and comes back to the same spot when you stop rotating.
+#            Rotation doesn't stop at the screen edge. This is WASD 1.x behavior.
+# Option 2: "centered"
+#            The cursor stays in the center of the screen. It shows the game's rotation icon;
+#            the Windows mod's crosshair is not available on Linux.
+# Option 3: "vanilla"
+#            The cursor is visible and moves like in vanilla BG3.
+#            When your cursor hits the screen edge, you cannot rotate the camera any further.
+#            This is only useful if you run into compatibility issues.
+
+CameraMovementRotationCursor = "invisible"
+# Same as CharacterMovementRotationCursor, but for the Camera movement mode.
+
+TogglingMovementModeAlsoTogglesCameraRotation = false
+# If true, when you switch to Character movement mode, the mod will toggle on camera rotation,
+# and when you switch to Camera movement mode, the mod will toggle off camera rotation.
+# [true, false]
+
+MouselookPauseKeys = "key:i,key:m,key:j,key:k,key:n,key:tab,key:b,key:l,key:p,key:h"
+# Linux only. Keys that open the game's panels: inventory, map, journal and so on.
+# Opening a panel with one of these keys pauses mouselook. It resumes when you close the panel with
+# the same key or Esc, or when you press ToggleCameraRotation.
+# The default is the game's Adventure Panels keys. If you rebind them in the game, change this too.
+# The Esc menu, dialogs, loading screens and text fields pause mouselook without any keys.
+
+RotatePlusLeftclickMovesForward = true
+# While you rotate the camera, holding the left mouse button moves your character forward.
+# [true, false]
+
+
+[Walking]
+
+WalkSpeed = 0.3
+# 1.0 would be the normal jog speed from vanilla. 0.5 would be 50% of that.
+# You cannot make the character move faster than vanilla with this option.
+# [0.0, 1.0]
+
+IsWalkingDefault = false
+# Whether the character walks, when the game starts up.
+# [true, false]
+
+SwitchToWalkingAfterCombat = false
+# Whether to switch to walking, when combat ends.
+# [true, false]
+
+
+[AutoToggleMovementMode]
+
+AutoToggleMovementMode = true
+# Automatically toggle movement mode depending on the context.
+# Toggle to Camera movement, when combat or turn-based mode starts, and back to Character movement,
+# when it ends.
+# If you load a savegame in the middle of a fight, the mod notices only when that fight ends, so
+# press ToggleMovementMode yourself.
+# [true, false]
+
+IsCharacterMovementDefault = true
+# Whether the game starts in Character or Camera movement mode.
+# [true, false]
+
+
+# Not available on Linux yet, and ignored if present:
+# PreventClickingActiveCharacter, PreventClickingCameraOccluders, BlockInteractMove.
+
+
+# List of all available keys for mod hotkeys:
+
+# Modifiers: ctrl, shift, alt. E.g. "ctrl+shift+key:w"
+# Multiple keycombos possible, separated by comma: "key:x,ctrl+key:y"
+
+# mouse:left            mouse:right             mouse:middle
+# mouse:x1              mouse:x2
+
+# key:a                 key:b                   ...                     key:z
+# key:1                 key:2                   ...                     key:0
+# key:f1                key:f2                  ...                     key:f24
+
+# key:left              key:up                  key:right               key:down
+# key:backspace         key:tab                 key:return              key:capslock
+# key:insert            key:delete              key:space               key:end
+# key:home              key:printscreen         key:scrolllock          key:escape
+# key:pause             key:numlock             key:pageup              key:pagedown
+
+# key:lalt              key:ralt
+# key:lshift            key:rshift
+# key:lctrl             key:rctrl
+# key:lgui              key:rgui (Windows or Super keys)
+
+# key:;                 key:=                   key:,                   key:'
+# key:-                 key:.                   key:/                   key:`
+# key:[                 key:]
+# key:\\ (Backslash is a very special character in the toml format. You must either
+# write xxx="key:\\" or xxx='key:\' for it to work.)
+
+# key:kp_0              key:kp_1                ...                     key:kp_9
+# key:kp_multiply       key:kp_plus             key:kp_period           key:kp_divide
+# key:kp_minus
+
+# key:modechange        key:prior               key:clear               key:select
+# key:execute           key:help                key:sleep
+# key:volume_down       key:volume_up           key:audio_mute          key:audio_next
+# key:audio_prev        key:audio_stop          key:audio_play
+# key:crsel             key:exsel               key:apps

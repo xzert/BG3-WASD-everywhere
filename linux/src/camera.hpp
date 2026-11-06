@@ -33,6 +33,19 @@ void SetWindow(void* window);
 // Whether the camera is being rotated right now (any thread).
 bool IsRotating();
 
+// Mouselook (ToggleCameraRotation): the camera keeps rotating without holding the rotate input.
+void ToggleMouselook();
+void SetMouselook(bool on);
+// The input mouselook holds down for the player: CameraToggleMouseRotate's binding.
+void SetRotateInput(bool mouse_button, int code);
+// Mouselook pauses while a dialog runs.
+void SetDialogActive(bool active);
+
+// A panel key (MouselookPauseKeys) was pressed: it opens or closes that panel, and mouselook pauses
+// while any panel opened this way is open. Esc closes them all; the mouselook key resumes too.
+void OnPanelKey(int key);
+void OnCloseAllPanels();
+
 // In Character mode outside combat: no edge panning, and the chase camera keeps its target
 // (BlockEdgePanningHook and PreventLosingChaseCamTargetHook on Windows).
 bool InstallCharacterModeCamera(const mem::MainExecutable& exe, uintptr_t is_in_controller_mode);

@@ -142,6 +142,47 @@ bool WriteCodeAtomic16(uintptr_t address, uint16_t value)
     return Protect(address, sizeof value, PROT_READ | PROT_EXEC);
 }
 
+bool UnhookEntry(uintptr_t function, const uint8_t* expected, size_t length)
+{
+    return WriteCode(function, expected, length);
+}
+
+bool HookEntry(uintptr_t function, const uint8_t* expected, size_t length, const void* hook, void** original)
+{
+    if (length < 5 || length > 32 || std::memcmp(reinterpret_cast<const void*>(function), expected, length) != 0) {
+        return false;
+    }
+    const auto page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+    uint8_t* block = AllocateNear(function, page);
+    if (!block) {
+        return false;
+    }
+    // Trampoline: the moved instructions, then `jmp function+length`.
+    uint8_t* trampoline = block;
+    std::memcpy(trampoline, expected, length);
+    trampoline[length] = 0xE9;
+    const auto back = static_cast<int32_t>(
+        static_cast<int64_t>(function + length - reinterpret_cast<uintptr_t>(trampoline + length + 5)));
+    std::memcpy(trampoline + length + 1, &back, sizeof back);
+    // Stub: `jmp qword ptr [rip+0] ; dq hook`, within rel32 reach of the function.
+    uint8_t* stub = block + 64;
+    static constexpr uint8_t kJmpRipIndirect[6] = { 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00 };
+    std::memcpy(stub, kJmpRipIndirect, sizeof kJmpRipIndirect);
+    std::memcpy(stub + sizeof kJmpRipIndirect, &hook, sizeof hook);
+    if (mprotect(block, page, PROT_READ | PROT_EXEC) != 0) {
+        munmap(block, page);
+        return false;
+    }
+
+    *original = trampoline;
+    uint8_t patch[32];
+    std::memset(patch, 0xCC, length);  // int3 after the jump; never reached
+    patch[0] = 0xE9;
+    const auto to_stub = static_cast<int32_t>(static_cast<int64_t>(reinterpret_cast<uintptr_t>(stub) - (function + 5)));
+    std::memcpy(patch + 1, &to_stub, sizeof to_stub);
+    return WriteCode(function, patch, length);
+}
+
 bool ReplaceVirtualCall(uintptr_t site, const void* stub)
 {
     const auto* code = reinterpret_cast<const uint8_t*>(site);
