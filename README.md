@@ -1,7 +1,7 @@
 # BG3 WASD Everywhere
 
-Direct character movement with WASD (or other keys) for Baldur's Gate 3, on Windows and on the
-native Linux build of the game. A macOS port is planned after the Linux port is complete.
+Direct character movement with WASD (or other keys) for Baldur's Gate 3: on Windows, on the native
+Linux build of the game and, as an early prototype, on the native macOS build for Apple Silicon.
 
 This is a fork of [BG3WASD](https://github.com/Ch4nKyy/BG3WASD) by Ch4nKyy
 ([Nexus Mods](https://www.nexusmods.com/baldursgate3/mods/781)). The Windows mod here is the
@@ -11,6 +11,9 @@ The fork adds a port for the native Linux version of the game. Larian released t
 September 2025 (Hotfix #34), and Steam runs it inside the Steam Linux Runtime. The Windows DLL can't
 load there, so the port is a separate `LD_PRELOAD` library in [`linux/`](linux/).
 
+The fork also starts a port for the native macOS version on Apple Silicon, in [`macos/`](macos/).
+It is a library that a small launcher loads into the game when Steam starts it.
+
 ## Which version do I need?
 
 | Your setup | Use |
@@ -18,24 +21,26 @@ load there, so the port is a separate `LD_PRELOAD` library in [`linux/`](linux/)
 | Windows | The original mod from [Nexus Mods](https://www.nexusmods.com/baldursgate3/mods/781) |
 | Linux, game running through Proton (`bin/bg3.exe`) | The original mod with Native Mod Loader. Launch options: `WINEDLLOVERRIDES="bink2w64=n,b" %command%` |
 | Linux or Steam Deck, native game (`bin/bg3`, no `.exe`) | The Linux port from this repository |
-| macOS | Not supported yet; see [Roadmap](#roadmap) |
+| macOS on Apple Silicon | The early macOS port from this repository; build it yourself, see [Install on macOS](#install-on-macos) |
 
 To find out which build you have, look in `Baldurs Gate 3/bin`. A `bg3` file without an extension
 means the native Linux build.
 
 ## Multiplatform port
 
-The Windows version is the original mod. The Linux version is a separate port in
-[`linux/`](linux/). A macOS port is planned; see [Roadmap](#roadmap).
+The Windows version is the original mod. The Linux and macOS versions are separate ports in
+[`linux/`](linux/) and [`macos/`](macos/); the macOS one is an early prototype.
 
-The Linux port supports game version **4.1.1.7631656** (Hotfix #36). On any other version it finds
-nothing, writes an error to its log and stays inactive. The game itself is not affected. The Linux
-port has not been tested on Steam Deck yet.
+Both ports support game version **4.1.1.7631656** (Hotfix #36).
+- The Linux port finds the game's code by byte signatures. On any other version it finds nothing,
+  writes an error to its log and stays inactive; the game itself is not affected. It has not been
+  tested on Steam Deck yet.
+- The macOS port finds the game's functions by their names, which the macOS build keeps.
 
 | Feature | Windows | Linux | macOS |
 |---|:---:|:---:|:---:|
-| WASD character movement, autoforward, walking, Character/Camera movement mode | ✅ | ✅ | — |
-| Movement keys don't pan the camera in Character mode | ✅ | ✅ | — |
+| WASD character movement, autoforward, walking, Character/Camera movement mode | ✅ | ✅ | ✅ ⁵ |
+| Movement keys don't pan the camera in Character mode | ✅ | ✅ | ✅ |
 | Camera rotation with an invisible or centered cursor | ✅ | ✅ ¹ | — |
 | Automatic Camera mode in combat | ✅ | ✅ ⁴ | — |
 | `ToggleCameraRotation` (mouselook without holding a button) | ✅ | ✅ | — |
@@ -45,7 +50,7 @@ port has not been tested on Steam Deck yet.
 | Unclickable active character and camera occluders | ✅ | — | — |
 | Blocking click-to-move (`BlockInteractMove`) | ✅ | — | — |
 | Movement mode follows turn-based mode (FTB) | ✅ | ✅ | — |
-| Movement keys bound automatically | ✅ | ✅ ³ | — |
+| Movement keys bound automatically | ✅ | ✅ ³ | ✅ ³ |
 | Config reloads when the file changes | ✅ | ✅ | — |
 
 Notes on the Linux column:
@@ -61,6 +66,12 @@ Notes on the Linux column:
 - ⁴ Combat is detected from the game's combat start and end events. If you load a save in the
   middle of a fight, the mod notices only at the next start or end, so press `ToggleMovementMode`
   yourself.
+
+Notes on the macOS column:
+
+- ³ As on Linux.
+- ⁵ No walking yet. There is no config file yet either: Caps Lock (movement mode) and Shift+W
+  (autoforward) are fixed.
 
 ### Install on Linux
 
@@ -94,10 +105,36 @@ toggles autoforward. Hotkeys, walking speed and the rotation cursor are set in
 More details, including how the port finds its way around the game's code, are in
 [linux/README.md](linux/README.md).
 
+### Install on macOS
+
+The macOS port is an early prototype for Apple Silicon Macs, without prebuilt releases yet.
+
+1. Install the Xcode Command Line Tools (`xcode-select --install`), get this repository into a
+   folder whose path has no spaces, and build:
+
+   ```bash
+   cd macos && make
+   ```
+
+2. In Steam, open Baldur's Gate 3 → Properties → General → Launch Options and enter, with your
+   path:
+
+   ```
+   /Users/you/BG3-WASD-everywhere/macos/build/bg3-wasd-everywhere-launch %command%
+   ```
+
+3. Start the game with Play. On the first start, macOS asks whether Steam may access the Documents
+   folder. Allow it: the game keeps its profiles and saves there.
+
+The log is `~/Library/Logs/bg3-wasd-everywhere/bg3-wasd-everywhere.log`. Caps Lock switches between
+Character and Camera movement, and Shift+W toggles autoforward. More details, including why Steam
+needs the launcher, are in [macos/README.md](macos/README.md).
+
 ## Roadmap
 
 1. Finish the Linux port: everything marked "—" in the Linux column above.
-2. Port the mod to the native macOS version of the game.
+2. Finish the macOS port. Next come the config file and hotkeys, walking, camera rotation and
+   mouselook, then the rest of the table and a release build.
 
 ## Building the Windows version
 
@@ -158,7 +195,7 @@ For more on architecture and reverse engineering, see the [doc](doc/) folder.
 
 ## Support
 
-If the Linux port is useful to you, you can support its development:
+If the Linux or macOS port is useful to you, you can support its development:
 
 - Boosty: TODO add link
 - Tribute: TODO add link
@@ -170,9 +207,9 @@ To support the original mod, see Ch4nKyy's
 
 - The original BG3WASD is by [Ch4nKyy](https://github.com/Ch4nKyy/BG3WASD); the Windows mod,
   the reverse engineering guide in [doc/](doc/) and the game knowledge the port builds on are theirs.
-- The Linux port is by [xzert](https://github.com/xzert).
+- The Linux and macOS ports are by [xzert](https://github.com/xzert).
 
 Licensed under GPL-3.0, like the original. See [LICENSE](LICENSE). This fork changes the original
-by adding the `linux/` port and this README.
+by adding the `linux/` and `macos/` ports and this README.
 
 Not affiliated with Larian Studios.
