@@ -2,8 +2,9 @@
 
 namespace wasd::log {
 
-// Opens the log file (truncating it). Before this is called, messages go to stderr.
-void Open(const char* path);
+// Opens the log file, truncating it unless `append` is set. Before this is called, messages go to
+// stderr.
+void Open(const char* path, bool append = false);
 
 void Write(const char* level, const char* format, ...) __attribute__((format(printf, 2, 3)));
 

@@ -502,8 +502,11 @@ Result PatchAllProfiles()
     } else if (const char* home = std::getenv("HOME"); home && *home) {
         base = std::string(home) + "/.local/share";
     }
-    const std::string profiles = base + "/Larian Studios/Baldur's Gate 3/PlayerProfiles";
+    return PatchProfiles(base + "/Larian Studios/Baldur's Gate 3/PlayerProfiles");
+}
 
+Result PatchProfiles(const std::string& profiles)
+{
     DIR* dir = opendir(profiles.c_str());
     if (!dir) {
         LOG_WARN("No player profiles in %s yet; bind the movement keys after starting the game once",

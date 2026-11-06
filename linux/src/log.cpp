@@ -15,10 +15,10 @@ std::mutex g_mutex;
 
 }  // namespace
 
-void Open(const char* path)
+void Open(const char* path, bool append)
 {
     std::lock_guard lock(g_mutex);
-    g_file = std::fopen(path, "w");
+    g_file = std::fopen(path, append ? "a" : "w");
     if (!g_file) {
         std::fprintf(stderr, "BG3 WASD Everywhere: cannot open log %s: %s\n", path, std::strerror(errno));
     }

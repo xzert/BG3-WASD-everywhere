@@ -22,9 +22,12 @@ struct Result {
 // Patches the JSON text (empty text counts as an empty object).
 Result PatchText(const std::string& in, std::string& out);
 
-// Patches every PlayerProfiles/*/inputconfig_p1.json, creating missing ones. Keeps a one-time backup
+// Patches every <profiles>/*/inputconfig_p1.json, creating missing ones. Keeps a one-time backup
 // (inputconfig_p1.json.bg3-wasd-everywhere.bak) and rewrites the file atomically. The result describes the
 // "Public" profile, or the first one found.
+Result PatchProfiles(const std::string& profiles);
+
+// PatchProfiles on the Linux game's PlayerProfiles folder.
 Result PatchAllProfiles();
 
 }  // namespace wasd::inputconfig
