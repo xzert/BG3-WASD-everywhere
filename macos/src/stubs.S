@@ -1,13 +1,13 @@
-// Pass-through stub of the macOS library (arm64). Each stub calls a C observer with the hooked
-// function's arguments, restores every argument register (x0-x8, q0-q7) and jumps on to the original
-// code. The observer can't disturb the call, whatever the function's signature or return convention
-// is: x8 carries the address for a returned struct.
+// Pass-through stubs of the macOS library (arm64). Each one leaves every argument register as it was
+// (x0-x8, q0-q7) and jumps on to the original code, so it can't disturb the call, whatever the
+// function's signature or return convention is: x8 carries the address for a returned struct.
 
 #if defined(__arm64__)
 
     .text
     .p2align 2
 
+    // Calls ObserveCameraInput with the arguments of ecl::CameraSystem::OnInputEvent.
     .private_extern _CameraInputProbe
 _CameraInputProbe:
     stp x29, x30, [sp, #-224]!
@@ -36,11 +36,28 @@ _CameraInputProbe:
     ldr x16, [x16, _g_camera_input_original@PAGEOFF]
     br x16
 
-    // Where the stub continues: the original function.
+    // Remembers the object of each gui::GameUI::Update call in g_game_ui. x16 is the scratch register
+    // of calls between functions, free when a function starts.
+    .p2align 2
+    .private_extern _GameUIUpdateProbe
+_GameUIUpdateProbe:
+    adrp x16, _g_game_ui@PAGE
+    str x0, [x16, _g_game_ui@PAGEOFF]
+    adrp x16, _g_game_ui_update_original@PAGE
+    ldr x16, [x16, _g_game_ui_update_original@PAGEOFF]
+    br x16
+
+    // Where the stubs continue: the original functions.
     .data
     .p2align 3
     .private_extern _g_camera_input_original
 _g_camera_input_original:
+    .quad 0
+    .private_extern _g_game_ui_update_original
+_g_game_ui_update_original:
+    .quad 0
+    .private_extern _g_game_ui
+_g_game_ui:
     .quad 0
 
 #endif

@@ -1,12 +1,19 @@
-// A stand-in for the game, to try the probe without starting Baldur's Gate 3. It defines the symbols
-// the probe looks for, with the same names and the same vtable slot, calls them the way the game
-// does, and checks what they return. tests/run-standin.sh runs it as "Baldur's Gate 3" with the
-// probe preloaded. Built without optimization, so every function keeps a full prologue.
+// A stand-in for the game, to try the library without starting Baldur's Gate 3. It defines the
+// symbols the library looks for, with the same names and the same vtable slot, calls them the way
+// the game does, and checks what they return. It also sends the key and mouse events of the test
+// config's hotkeys through -[BG3Application sendEvent:] and checks what reaches the game.
+// tests/run-standin.sh runs it as "Baldur's Gate 3" with the library preloaded. Built without
+// optimization, so every function keeps a full prologue.
+//
+// Usage: standin --write-config <config>   writes the test config the library starts with
+//        standin <config>                  runs the test; it changes the config on the way
 
 #import <AppKit/AppKit.h>
+#include <ApplicationServices/ApplicationServices.h>
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <initializer_list>
 
 namespace ecs {
@@ -22,6 +29,19 @@ struct InputEvent {
     float value;
 };
 enum EInputPlayerIndex : int { Player1 = 0 };
+struct AnyView {
+    int id;
+};
+struct GameTime {
+    double time;
+};
+struct FixedString {
+    uint32_t index;
+};
+class STDString {
+public:
+    char text[24];
+};
 class InputManager {
 public:
     float GetInputValue(const unsigned& id, EInputPlayerIndex player) const;
@@ -29,7 +49,7 @@ public:
 }  // namespace ls
 
 namespace ecl {
-// Bigger than 16 bytes, so it comes back through the memory x8 points at: the probe's stubs must
+// Bigger than 16 bytes, so it comes back through the memory x8 points at: the library's stubs must
 // keep x8 intact.
 struct InputResult {
     uint64_t entity, id, device, check;
@@ -49,14 +69,68 @@ public:
 };
 }  // namespace ecl
 
+namespace ecl {
+enum EMouseCursorMode : int {};
+// The camera shows its rotation cursor (mode 0x2E) here while the rotate input is held.
+class CursorControl {
+public:
+    void AddForcedMouseCursor(EMouseCursorMode mode);
+    void RemoveForcedMouseCursor(EMouseCursorMode mode);
+
+    int added = 0, removed = 0;
+};
+}  // namespace ecl
+
+namespace ecl {
+struct Character;
+// Records the start and end of each dialog the player's character joins.
+class GameAnalyticsSystem {
+public:
+    void RecordDialogStart(const Character* character, const char* dialog, const ls::STDString& name, bool flag) const;
+    void RecordDialogEnd(const Character* character, const ls::FixedString& dialog, const ls::STDString& name, bool flag) const;
+};
+}  // namespace ecl
+
+// The game's cursor position is the first two floats gCore points to; -[LSMTLView mouseMoved:]
+// writes it.
+float g_cursor_position[2] = { 400.0f, 300.0f };
+float* gCore = g_cursor_position;
+
 namespace gui {
+// The engine calls Update every frame through the vtable; the library finds its slot by the target.
 class GameUI {
 public:
-    void OnIsGameMenuOpenChanged(short player, bool open);
+    virtual ~GameUI();
+    virtual bool IsTextInputElementFocused() const;
+    virtual void Update(const ls::AnyView& view, const ls::GameTime& time);
+    virtual void OnIsGameMenuOpenChanged(short player, bool open);
+
+    bool text_field_focused = false;
+    int updates = 0;
+    int menu_changes = 0;
 };
 }  // namespace gui
 
 namespace {
+
+// The config the test starts with and then changes: ToggleWalkspeed and WalkSpeed vary.
+constexpr const char* kConfigFormat = "[ModHotkeys]\n"
+                                      "ToggleMovementMode = \"key:capslock\"\n"
+                                      "HoldMovementMode = \"mouse:right\"\n"
+                                      "ToggleAutoforward = \"shift+key:w\"\n"
+                                      "ToggleWalkspeed = \"%s\"\n"
+                                      "HoldWalkspeed = \"key:lalt\"\n"
+                                      "ReloadConfig = \"ctrl+key:f5\"\n"
+                                      "ToggleCameraRotation = \"key:g\"\n"
+                                      "MouselookPauseKeys = \"key:i\"\n"
+                                      "[Walking]\n"
+                                      "WalkSpeed = %s\n";
+
+// macOS virtual key codes (kVK_*).
+constexpr unsigned short kW = 0x0D, kS = 0x01, kR = 0x0F, kT = 0x11, kY = 0x10, kF5 = 0x60;
+constexpr unsigned short kCapsLock = 0x39, kOption = 0x3A, kControl = 0x3B;
+// NSEvent's device-dependent flags for the left Option and Control keys.
+constexpr NSEventModifierFlags kLeftOption = 0x20, kLeftControl = 0x1;
 
 struct Vector3 {
     float x, y, z;
@@ -68,13 +142,29 @@ struct Received {
     unsigned short key;
     NSEventModifierFlags modifiers;
 };
-Received g_received[32];
+constexpr int kMaxReceived = 64;
+Received g_received[kMaxReceived];
 int g_events = 0;
+int g_other_downs = 0, g_other_ups = 0;  // middle mouse button presses and releases the game got
+int g_dialog_records = 0;
+// While set, the stand-in plays the game's camera: the middle button down shows its rotation cursor.
+ecl::CursorControl* g_simulated_camera = nullptr;
 
 // Returned in s0-s2, like the game's.
 Vector3 GetRotatedInput(short player, bool flag)
 {
     return { float(player) + 0.5f, flag ? 1.0f : -1.0f, 0.25f };
+}
+
+bool WriteConfig(const char* path, const char* toggle_walkspeed, const char* walk_speed)
+{
+    FILE* file = std::fopen(path, "w");
+    if (!file) {
+        std::printf("can't write %s\n", path);
+        return false;
+    }
+    std::fprintf(file, kConfigFormat, toggle_walkspeed, walk_speed);
+    return std::fclose(file) == 0;
 }
 
 }  // namespace
@@ -97,7 +187,23 @@ float ls::InputManager::GetInputValue(const unsigned& id, EInputPlayerIndex play
     return float(id) + float(player);
 }
 
-void gui::GameUI::OnIsGameMenuOpenChanged(short, bool) {}
+void ecl::CursorControl::AddForcedMouseCursor(EMouseCursorMode) { ++added; }
+void ecl::CursorControl::RemoveForcedMouseCursor(EMouseCursorMode) { ++removed; }
+
+gui::GameUI::~GameUI() {}
+bool gui::GameUI::IsTextInputElementFocused() const { return text_field_focused; }
+void gui::GameUI::Update(const ls::AnyView& view, const ls::GameTime&) { updates += view.id; }
+void gui::GameUI::OnIsGameMenuOpenChanged(short, bool) { ++menu_changes; }
+
+void ecl::GameAnalyticsSystem::RecordDialogStart(const Character*, const char*, const ls::STDString&, bool) const
+{
+    ++g_dialog_records;
+}
+
+void ecl::GameAnalyticsSystem::RecordDialogEnd(const Character*, const ls::FixedString&, const ls::STDString&, bool) const
+{
+    ++g_dialog_records;
+}
 
 @interface BG3Application : NSApplication
 @end
@@ -106,55 +212,113 @@ void gui::GameUI::OnIsGameMenuOpenChanged(short, bool) {}
 // Doesn't call NSApplication: over SSH there is no window server session to talk to.
 - (void)sendEvent:(NSEvent*)event
 {
-    if (g_events < 32) {
-        g_received[g_events] = { event.type, event.keyCode,
+    // Like the game's view: a mouse move writes the cursor position.
+    const NSEventType type = event.type;
+    if (type == NSEventTypeMouseMoved || type == NSEventTypeLeftMouseDragged || type == NSEventTypeOtherMouseDragged) {
+        g_cursor_position[0] = 100.0f;
+        g_cursor_position[1] = 100.0f;
+    }
+    if (type == NSEventTypeOtherMouseDown || type == NSEventTypeOtherMouseUp) {
+        const bool down = type == NSEventTypeOtherMouseDown;
+        ++(down ? g_other_downs : g_other_ups);
+        if (g_simulated_camera) {
+            if (down) {
+                g_simulated_camera->AddForcedMouseCursor(ecl::EMouseCursorMode(0x2E));
+            } else {
+                g_simulated_camera->RemoveForcedMouseCursor(ecl::EMouseCursorMode(0x2E));
+            }
+        }
+    }
+    if (g_events < kMaxReceived) {
+        g_received[g_events] = { event.type, event.type == NSEventTypeKeyDown || event.type == NSEventTypeKeyUp ||
+                    event.type == NSEventTypeFlagsChanged ? event.keyCode : (unsigned short)0,
             event.modifierFlags & (NSEventModifierFlagShift | NSEventModifierFlagCapsLock) };
     }
     ++g_events;
 }
 @end
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc == 3 && std::strcmp(argv[1], "--write-config") == 0) {
+        return WriteConfig(argv[2], "key:r", "0.5") ? 0 : 1;
+    }
+    if (argc != 2) {
+        std::fprintf(stderr, "usage: %s [--write-config] <config>\n", argv[0]);
+        return 2;
+    }
+    const char* config = argv[1];
+
     @autoreleasepool {
         int failures = 0;
 
         ecl::CameraSystem* camera = new ecl::CameraSystem;
         const ecs::EntityRef entity{ 7 };
-        // In Character mode, the library's default, the camera movement actions (99-102) reach the
-        // camera with id 0.
-        auto check_camera = [&](bool character_mode) {
+        // In Character mode, the camera movement actions (99-102) reach the camera with id 0.
+        auto check_camera = [&](bool character_mode, const char* step) {
             for (uint32_t id : { 99u, 100u, 101u, 102u, 5u }) {
                 ls::InputEvent event{ id, 2, 1.0f };
                 const ecl::InputResult result = camera->OnInputEvent(entity, event);
                 const uint64_t expected = character_mode && id >= 99 && id <= 102 ? 0 : id;
                 if (result.entity != 7 || result.id != expected || result.device != 2 ||
                     result.check != 7000 + expected) {
-                    std::printf("%s mode: OnInputEvent(%u) returned %llu %llu %llu %llu\n",
-                        character_mode ? "Character" : "Camera", id, (unsigned long long)result.entity,
-                        (unsigned long long)result.id, (unsigned long long)result.device,
-                        (unsigned long long)result.check);
+                    std::printf("%s: OnInputEvent(%u) returned %llu %llu %llu %llu\n", step, id,
+                        (unsigned long long)result.entity, (unsigned long long)result.id,
+                        (unsigned long long)result.device, (unsigned long long)result.check);
                     ++failures;
                 }
             }
         };
-        // GetRotatedInput is inline-hooked: in Camera mode it returns no movement.
-        auto check_movement = [&](bool character_mode) {
+        // GetRotatedInput is inline-hooked: no movement in Camera mode (scale 0), a shorter one while
+        // walking.
+        auto check_movement = [&](float scale, const char* step) {
             for (short player = 0; player < 3; ++player) {
                 const bool flag = player != 1;
                 const Vector3 value = GetRotatedInput(player, flag);
-                const Vector3 expected = character_mode ? Vector3{ float(player) + 0.5f, flag ? 1.0f : -1.0f, 0.25f }
-                                                        : Vector3{ 0.0f, 0.0f, 0.0f };
+                const Vector3 expected{ (float(player) + 0.5f) * scale, (flag ? 1.0f : -1.0f) * scale, 0.25f * scale };
                 if (value.x != expected.x || value.y != expected.y || value.z != expected.z) {
-                    std::printf("%s mode: GetRotatedInput(%d) returned %f %f %f\n",
-                        character_mode ? "Character" : "Camera", player, value.x, value.y, value.z);
+                    std::printf("%s: GetRotatedInput(%d) returned %g %g %g, not %g %g %g\n", step, player, value.x,
+                        value.y, value.z, expected.x, expected.y, expected.z);
                     ++failures;
                 }
             }
         };
-        check_camera(true);
-        check_movement(true);
 
+        BG3Application* application = [BG3Application alloc];
+        int expected_events = 0;
+        auto expect_events = [&](int count, const char* step) {
+            expected_events += count;
+            if (g_events != expected_events) {
+                std::printf("%s: sendEvent: reached the game %d times, not %d\n", step, g_events, expected_events);
+                ++failures;
+                expected_events = g_events;
+            }
+        };
+        auto key = [&](NSEventType type, unsigned short code, NSEventModifierFlags flags, BOOL repeat) {
+            NSString* text = code == kW ? @"w" : code == kS ? @"s" : @"";
+            [application sendEvent:[NSEvent keyEventWithType:type location:NSZeroPoint modifierFlags:flags
+                                                    timestamp:0 windowNumber:0 context:nil characters:text
+                                  charactersIgnoringModifiers:text isARepeat:repeat keyCode:code]];
+        };
+        auto tap = [&](unsigned short code, NSEventModifierFlags flags) {
+            key(NSEventTypeKeyDown, code, flags, NO);
+            key(NSEventTypeKeyUp, code, flags, NO);
+        };
+        auto modifiers = [&](unsigned short code, NSEventModifierFlags flags) {
+            [application sendEvent:[NSEvent keyEventWithType:NSEventTypeFlagsChanged location:NSZeroPoint
+                                               modifierFlags:flags timestamp:0 windowNumber:0 context:nil
+                                                  characters:@"" charactersIgnoringModifiers:@"" isARepeat:NO
+                                                     keyCode:code]];
+        };
+        auto mouse = [&](NSEventType type) {
+            [application sendEvent:[NSEvent mouseEventWithType:type location:NSZeroPoint modifierFlags:0
+                                                      timestamp:0 windowNumber:0 context:nil eventNumber:0
+                                                     clickCount:1 pressure:1.0f]];
+        };
+
+        // Character mode, the default: the movement keys don't pan the camera, movement is as is.
+        check_camera(true, "start");
+        check_movement(1.0f, "start");
         const ls::InputManager input;
         const unsigned id = 0xA0;
         if (input.GetInputValue(id, ls::Player1) != 160.0f) {
@@ -163,39 +327,27 @@ int main()
         }
         gui::GameUI().OnIsGameMenuOpenChanged(0, true);
 
-        NSEvent* key = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
-                                       timestamp:0 windowNumber:0 context:nil characters:@"w"
-                     charactersIgnoringModifiers:@"w" isARepeat:NO keyCode:13];
-        BG3Application* application = [BG3Application alloc];
-        [application sendEvent:key];
+        tap(kW, 0);
+        expect_events(2, "W");
 
         // Caps Lock on, then off: each change switches the movement mode.
         for (NSEventModifierFlags flags : { NSEventModifierFlags(NSEventModifierFlagCapsLock), NSEventModifierFlags(0) }) {
-            NSEvent* caps_lock = [NSEvent keyEventWithType:NSEventTypeFlagsChanged location:NSZeroPoint
-                                             modifierFlags:flags timestamp:0 windowNumber:0 context:nil
-                                                characters:@"" charactersIgnoringModifiers:@"" isARepeat:NO
-                                                   keyCode:57];
-            [application sendEvent:caps_lock];
-            check_camera(flags == 0);
-            check_movement(flags == 0);
+            modifiers(kCapsLock, flags);
+            check_camera(flags == 0, flags ? "Caps Lock on" : "Caps Lock off");
+            check_movement(flags == 0 ? 1.0f : 0.0f, flags ? "Caps Lock on" : "Caps Lock off");
         }
+        expect_events(2, "Caps Lock");
+
         // Shift+W toggles autoforward: the game gets a Forward key-down of the library's instead, and
         // neither the press nor its repeat and release. Backward ends autoforward: the game gets the
         // library's Forward key-up, then Backward itself.
-        auto send = [&](NSEventType type, unsigned short key, NSEventModifierFlags flags, BOOL repeat) {
-            NSString* text = key == 13 ? @"w" : @"s";
-            [application sendEvent:[NSEvent keyEventWithType:type location:NSZeroPoint modifierFlags:flags
-                                                    timestamp:0 windowNumber:0 context:nil characters:text
-                                  charactersIgnoringModifiers:text isARepeat:repeat keyCode:key]];
-        };
         const int before = g_events;
-        send(NSEventTypeKeyDown, 13, NSEventModifierFlagShift, NO);
-        send(NSEventTypeKeyDown, 13, NSEventModifierFlagShift, YES);
-        send(NSEventTypeKeyUp, 13, NSEventModifierFlagShift, NO);
-        send(NSEventTypeKeyDown, 1, 0, NO);
-        send(NSEventTypeKeyUp, 1, 0, NO);
-        const Received expected[] = { { NSEventTypeKeyDown, 13, 0 }, { NSEventTypeKeyUp, 13, 0 },
-            { NSEventTypeKeyDown, 1, 0 }, { NSEventTypeKeyUp, 1, 0 } };
+        key(NSEventTypeKeyDown, kW, NSEventModifierFlagShift, NO);
+        key(NSEventTypeKeyDown, kW, NSEventModifierFlagShift, YES);
+        key(NSEventTypeKeyUp, kW, NSEventModifierFlagShift, NO);
+        tap(kS, 0);
+        const Received expected[] = { { NSEventTypeKeyDown, kW, 0 }, { NSEventTypeKeyUp, kW, 0 },
+            { NSEventTypeKeyDown, kS, 0 }, { NSEventTypeKeyUp, kS, 0 } };
         const int count = int(sizeof expected / sizeof expected[0]);
         bool autoforward_ok = g_events - before == count;
         for (int i = 0; autoforward_ok && i < count; ++i) {
@@ -205,17 +357,249 @@ int main()
         }
         if (!autoforward_ok) {
             std::printf("autoforward: the game got %d events:", g_events - before);
-            for (int i = before; i < g_events && i < 32; ++i) {
+            for (int i = before; i < g_events && i < kMaxReceived; ++i) {
                 std::printf(" type %lu key %u flags %#lx;", (unsigned long)g_received[i].type, g_received[i].key,
                     (unsigned long)g_received[i].modifiers);
             }
             std::printf("\n");
             ++failures;
         }
-        if (g_events != 3 + count) {
-            std::printf("sendEvent: reached the application %d times\n", g_events);
+        expect_events(count, "autoforward");
+
+        // Walking at WalkSpeed 0.5: R toggles it, the left Option key holds it.
+        tap(kR, 0);
+        check_movement(0.5f, "R: walking on");
+        tap(kR, 0);
+        check_movement(1.0f, "R: walking off");
+        modifiers(kOption, NSEventModifierFlagOption | kLeftOption);
+        check_movement(0.5f, "Option held");
+        modifiers(kOption, 0);
+        check_movement(1.0f, "Option released");
+        expect_events(6, "walking");
+
+        // The right mouse button holds Camera mode.
+        mouse(NSEventTypeRightMouseDown);
+        check_movement(0.0f, "right button held");
+        check_camera(false, "right button held");
+        mouse(NSEventTypeRightMouseUp);
+        check_movement(1.0f, "right button released");
+        check_camera(true, "right button released");
+        expect_events(2, "right button");
+
+        // ReloadConfig (Ctrl+F5) loads the changed config: T toggles walking at 0.25, R no longer.
+        failures += WriteConfig(config, "key:t", "0.25") ? 0 : 1;
+        modifiers(kControl, NSEventModifierFlagControl | kLeftControl);
+        tap(kF5, NSEventModifierFlagControl | kLeftControl);
+        modifiers(kControl, 0);
+        tap(kR, 0);
+        check_movement(1.0f, "R after ReloadConfig");
+        tap(kT, 0);
+        check_movement(0.25f, "T after ReloadConfig");
+        tap(kT, 0);
+        check_movement(1.0f, "T again");
+        expect_events(10, "ReloadConfig");
+
+        // A saved config is loaded about a second later: Y toggles walking at 0.75.
+        failures += WriteConfig(config, "key:y", "0.75") ? 0 : 1;
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:2.5]];
+        tap(kY, 0);
+        check_movement(0.75f, "Y after saving the config");
+        tap(kY, 0);
+        check_movement(1.0f, "Y again");
+        expect_events(4, "config saved");
+
+        // While the game's GameUI says a text field has the focus, key presses reach the game and
+        // trigger no hotkeys: Caps Lock doesn't switch the mode, Shift+W is a capital W.
+        gui::GameUI* ui = new gui::GameUI;
+        ui->Update(ls::AnyView{ 1 }, ls::GameTime{ 0.0 });
+        if (ui->updates != 1) {
+            std::printf("GameUI::Update didn't reach the game\n");
             ++failures;
         }
+        ui->text_field_focused = true;
+        const int typing_start = g_events;
+        modifiers(kCapsLock, NSEventModifierFlagCapsLock);
+        check_movement(1.0f, "Caps Lock while typing");
+        key(NSEventTypeKeyDown, kW, NSEventModifierFlagShift, NO);
+        key(NSEventTypeKeyUp, kW, NSEventModifierFlagShift, NO);
+        const Received typed[] = { { NSEventTypeFlagsChanged, kCapsLock, NSEventModifierFlagCapsLock },
+            { NSEventTypeKeyDown, kW, NSEventModifierFlagShift }, { NSEventTypeKeyUp, kW, NSEventModifierFlagShift } };
+        for (int i = 0; i < 3; ++i) {
+            const Received& got = g_received[typing_start + i];
+            if (typing_start + i >= g_events || got.type != typed[i].type || got.key != typed[i].key ||
+                got.modifiers != typed[i].modifiers) {
+                std::printf("typing: event %d isn't the one sent\n", i);
+                ++failures;
+            }
+        }
+        expect_events(3, "typing");
+        // The text field closes: the next Caps Lock change switches the mode again.
+        ui->text_field_focused = false;
+        modifiers(kCapsLock, 0);
+        check_movement(0.0f, "Caps Lock after typing");
+        modifiers(kCapsLock, NSEventModifierFlagCapsLock);
+        check_movement(1.0f, "Caps Lock again");
+        expect_events(2, "after typing");
+
+        // Camera rotation. The game shows its rotation cursor (mode 0x2E) through CursorControl, from
+        // its own thread; the library takes the cursor over on the main thread once the mouse moved
+        // more than 6 points. Over SSH the real cursor isn't touched, the game's cursor position is.
+        ecl::CursorControl* cursors = new ecl::CursorControl;
+        auto run_main_queue = [] { [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.2]]; };
+        auto cg_mouse = [&](CGEventType type, CGMouseButton button, double dx, double dy) {
+            CGEventRef cg = CGEventCreateMouseEvent(nullptr, type, CGPointMake(100, 100), button);
+            if (!cg) {
+                std::printf("can't create mouse events here\n");
+                ++failures;
+                return;
+            }
+            CGEventSetIntegerValueField(cg, kCGMouseEventDeltaX, int64_t(dx));
+            CGEventSetIntegerValueField(cg, kCGMouseEventDeltaY, int64_t(dy));
+            CGEventSetDoubleValueField(cg, kCGMouseEventDeltaX, dx);
+            CGEventSetDoubleValueField(cg, kCGMouseEventDeltaY, dy);
+            NSEvent* event = [NSEvent eventWithCGEvent:cg];
+            CFRelease(cg);
+            if (event && (dx || dy) && event.deltaX != dx) {
+                std::printf("mouse event delta %g, not %g\n", event.deltaX, dx);
+                ++failures;
+            }
+            [application sendEvent:event];
+        };
+        auto check_cursor = [&](float y, const char* step) {
+            if (g_cursor_position[1] != y) {
+                std::printf("%s: the game's cursor is at y %g, not %g\n", step, g_cursor_position[1], y);
+                ++failures;
+            }
+        };
+        cg_mouse(kCGEventOtherMouseDown, kCGMouseButtonCenter, 0, 0);  // the game's rotate input
+        cursors->AddForcedMouseCursor(ecl::EMouseCursorMode(0x2E));
+        run_main_queue();
+        if (cursors->added != 1) {
+            std::printf("AddForcedMouseCursor didn't reach the game\n");
+            ++failures;
+        }
+        g_cursor_position[0] = 400.0f;  // where the cursor was when rotation started
+        g_cursor_position[1] = 300.0f;
+        cg_mouse(kCGEventOtherMouseDragged, kCGMouseButtonCenter, 3, 0);
+        check_cursor(100.0f, "a small move while rotating");
+        cg_mouse(kCGEventOtherMouseDragged, kCGMouseButtonCenter, 10, 0);
+        check_cursor(-1000000.0f, "rotating");
+        // Rotate + left click walks forward: the game gets the Forward key instead of the click.
+        const int click_start = g_events;
+        mouse(NSEventTypeLeftMouseDown);
+        mouse(NSEventTypeLeftMouseUp);
+        const Received walked[] = { { NSEventTypeKeyDown, kW, 0 }, { NSEventTypeKeyUp, kW, 0 } };
+        for (int i = 0; i < 2; ++i) {
+            const Received& got = g_received[click_start + i];
+            if (click_start + i >= g_events || got.type != walked[i].type || got.key != walked[i].key) {
+                std::printf("rotate + left click: event %d isn't the Forward key\n", i);
+                ++failures;
+            }
+        }
+        cursors->RemoveForcedMouseCursor(ecl::EMouseCursorMode(0x2E));
+        run_main_queue();
+        if (cursors->removed != 1) {
+            std::printf("RemoveForcedMouseCursor didn't reach the game\n");
+            ++failures;
+        }
+        check_cursor(300.0f, "rotation ended");
+        cg_mouse(kCGEventOtherMouseUp, kCGMouseButtonCenter, 0, 0);
+        cg_mouse(kCGEventMouseMoved, kCGMouseButtonLeft, 20, 0);
+        check_cursor(100.0f, "a move after rotation");
+        expect_events(7, "rotation");
+
+        // Another forced cursor, like the ping cursor (7), isn't rotation.
+        cursors->AddForcedMouseCursor(ecl::EMouseCursorMode(7));
+        run_main_queue();
+        cg_mouse(kCGEventMouseMoved, kCGMouseButtonLeft, 20, 0);
+        check_cursor(100.0f, "the ping cursor");
+        cursors->RemoveForcedMouseCursor(ecl::EMouseCursorMode(7));
+        run_main_queue();
+        expect_events(1, "the ping cursor");
+
+        // Releasing the rotate input ends rotation even if the game doesn't end it.
+        constexpr unsigned short kQ = 0x0C;
+        key(NSEventTypeKeyDown, kQ, 0, NO);
+        cursors->AddForcedMouseCursor(ecl::EMouseCursorMode(0x2E));
+        run_main_queue();
+        cg_mouse(kCGEventMouseMoved, kCGMouseButtonLeft, 10, 0);
+        check_cursor(-1000000.0f, "rotating with a key");
+        key(NSEventTypeKeyUp, kQ, 0, NO);
+        check_cursor(100.0f, "the rotate key released");
+        cursors->RemoveForcedMouseCursor(ecl::EMouseCursorMode(0x2E));
+        run_main_queue();
+        expect_events(3, "rotating with a key");
+
+        // Mouselook (ToggleCameraRotation, G in the test config): the library holds the middle button
+        // for the player and lets go of it for each pause. The stand-in plays the game, asking for
+        // the movement input every 50 ms and showing the rotation cursor while the button is down.
+        constexpr unsigned short kG = 0x05, kI = 0x22;
+        g_simulated_camera = cursors;
+        auto run = [](double seconds) { [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]]; };
+        auto start_frames = [] {
+            return [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer*) {
+                GetRotatedInput(0, true);
+            }];
+        };
+        NSTimer* frames = start_frames();
+        const int downs_before = g_other_downs, ups_before = g_other_ups;
+        auto expect_presses = [&](int downs, int ups, const char* step) {
+            if (g_other_downs - downs_before != downs || g_other_ups - ups_before != ups) {
+                std::printf("%s: the game got %d presses and %d releases of the middle button, not %d and %d\n", step,
+                    g_other_downs - downs_before, g_other_ups - ups_before, downs, ups);
+                ++failures;
+            }
+        };
+        tap(kG, 0);
+        run(0.3);
+        expect_presses(1, 0, "mouselook on");
+        cg_mouse(kCGEventOtherMouseDown, kCGMouseButtonCenter, 0, 0);  // the player's own middle button
+        cg_mouse(kCGEventOtherMouseUp, kCGMouseButtonCenter, 0, 0);
+        expect_presses(1, 0, "the middle button while mouselook holds it");
+        ui->text_field_focused = true;
+        run(0.15);
+        expect_presses(1, 1, "a text field");
+        ui->text_field_focused = false;
+        run(0.3);
+        expect_presses(2, 1, "the text field closed");
+        tap(kI, 0);
+        expect_presses(2, 2, "a panel key");
+        tap(kI, 0);
+        run(0.2);
+        expect_presses(3, 2, "the panel key again");
+        ui->OnIsGameMenuOpenChanged(0, true);
+        run(0.15);
+        expect_presses(3, 3, "the game menu");
+        ui->OnIsGameMenuOpenChanged(0, false);
+        run(0.3);
+        expect_presses(4, 3, "the game menu closed");
+        if (ui->menu_changes != 2) {
+            std::printf("OnIsGameMenuOpenChanged reached the game %d times, not 2\n", ui->menu_changes);
+            ++failures;
+        }
+        const ecl::GameAnalyticsSystem analytics;
+        const ls::STDString name{};
+        analytics.RecordDialogStart(nullptr, "dialog", name, true);
+        run(0.15);
+        expect_presses(4, 4, "a dialog");
+        analytics.RecordDialogEnd(nullptr, ls::FixedString{ 1 }, name, true);
+        run(0.3);
+        expect_presses(5, 4, "the dialog ended");
+        if (g_dialog_records != 2) {
+            std::printf("RecordDialogStart/End reached the game %d times, not 2\n", g_dialog_records);
+            ++failures;
+        }
+        [frames invalidate];  // the game stops asking for the movement input: a menu or a loading screen
+        run(0.45);
+        expect_presses(5, 5, "no movement input");
+        frames = start_frames();
+        run(0.3);
+        expect_presses(6, 5, "movement input again");
+        tap(kG, 0);
+        run(0.2);
+        expect_presses(6, 6, "mouselook off");
+        [frames invalidate];
+        g_simulated_camera = nullptr;
 
         std::printf("stand-in: %s\n", failures ? "FAILED" : "every call returned the right values");
         return failures ? 1 : 0;

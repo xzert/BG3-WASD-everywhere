@@ -1,21 +1,25 @@
 #!/bin/sh
 # Runs the stand-in as "Baldur's Gate 3" with the library preloaded, then prints the stand-in's
-# output and the library's log. HOME points at a scratch folder, so the log and the key bindings the
-# library writes don't touch the real ones.
+# output and the library's log. The library goes to a scratch folder with the stand-in's test config
+# next to it, and HOME points there too, so the log, the config and the key bindings the library
+# writes don't touch the real ones.
 #
-# Usage: run-standin.sh <probe dylib> <stand-in executable>
+# Usage: run-standin.sh <library> <stand-in executable>
 set -u
 
-library="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 dir="$(mktemp -d)"
+library="$dir/libbg3-wasd-everywhere.dylib"
+config="$dir/bg3-wasd-everywhere.toml"
+cp "$1" "$library"
 cp "$2" "$dir/Baldur's Gate 3"
+"$2" --write-config "$config" || exit 1
 home="$dir/home"
 profile="$home/Documents/Larian Studios/Baldur's Gate 3/PlayerProfiles/Public"
 mkdir -p "$home/Library/Logs" "$profile"
 log="$home/Library/Logs/bg3-wasd-everywhere/bg3-wasd-everywhere.log"
 status=0
 
-HOME="$home" DYLD_INSERT_LIBRARIES="$library" "$dir/Baldur's Gate 3"
+HOME="$home" DYLD_INSERT_LIBRARIES="$library" "$dir/Baldur's Gate 3" "$config"
 result=$?
 echo "exit status $result"
 [ "$result" -eq 0 ] || status=1

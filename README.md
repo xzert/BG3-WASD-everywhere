@@ -39,19 +39,19 @@ Both ports support game version **4.1.1.7631656** (Hotfix #36).
 
 | Feature | Windows | Linux | macOS |
 |---|:---:|:---:|:---:|
-| WASD character movement, autoforward, walking, Character/Camera movement mode | ✅ | ✅ | ✅ ⁵ |
+| WASD character movement, autoforward, walking, Character/Camera movement mode | ✅ | ✅ | ✅ |
 | Movement keys don't pan the camera in Character mode | ✅ | ✅ | ✅ |
-| Camera rotation with an invisible or centered cursor | ✅ | ✅ ¹ | — |
+| Camera rotation with an invisible or centered cursor | ✅ | ✅ ¹ | ✅ ¹ |
 | Automatic Camera mode in combat | ✅ | ✅ ⁴ | — |
-| `ToggleCameraRotation` (mouselook without holding a button) | ✅ | ✅ | — |
-| Rotation turns off in menus, dialogs, loot and photo mode | ✅ | ✅ ² | — |
+| `ToggleCameraRotation` (mouselook without holding a button) | ✅ | ✅ | ✅ |
+| Rotation turns off in menus, dialogs, loot and photo mode | ✅ | ✅ ² | ✅ ² |
 | No edge panning in Character mode | ✅ | ✅ | — |
-| Rotate + left click moves forward | ✅ | ✅ | — |
+| Rotate + left click moves forward | ✅ | ✅ | ✅ |
 | Unclickable active character and camera occluders | ✅ | — | — |
 | Blocking click-to-move (`BlockInteractMove`) | ✅ | — | — |
 | Movement mode follows turn-based mode (FTB) | ✅ | ✅ | — |
 | Movement keys bound automatically | ✅ | ✅ ³ | ✅ ³ |
-| Config reloads when the file changes | ✅ | ✅ | — |
+| Config reloads when the file changes | ✅ | ✅ | ✅ |
 
 Notes on the Linux column:
 
@@ -69,9 +69,9 @@ Notes on the Linux column:
 
 Notes on the macOS column:
 
-- ³ As on Linux.
-- ⁵ No walking yet. There is no config file yet either: Caps Lock (movement mode) and Shift+W
-  (autoforward) are fixed.
+- ¹ ² ³ As on Linux. Mouselook's pause in dialogs isn't checked in game yet.
+- The config has only the settings the port supports so far. Key names are the same as on Linux;
+  on a Mac keyboard, `alt` is Option and `gui` is Command.
 
 ### Install on Linux
 
@@ -127,14 +127,15 @@ The macOS port is an early prototype for Apple Silicon Macs, without prebuilt re
    folder. Allow it: the game keeps its profiles and saves there.
 
 The log is `~/Library/Logs/bg3-wasd-everywhere/bg3-wasd-everywhere.log`. Caps Lock switches between
-Character and Camera movement, and Shift+W toggles autoforward. More details, including why Steam
-needs the launcher, are in [macos/README.md](macos/README.md).
+Character and Camera movement, and Shift+W toggles autoforward. Hotkeys, walking speed and the
+rotation cursor are set in `macos/build/bg3-wasd-everywhere.toml`, next to the library. More details,
+including why Steam needs the launcher, are in [macos/README.md](macos/README.md).
 
 ## Roadmap
 
 1. Finish the Linux port: everything marked "—" in the Linux column above.
-2. Finish the macOS port. Next come the config file and hotkeys, walking, camera rotation and
-   mouselook, then the rest of the table and a release build.
+2. Finish the macOS port: the rest of the table (Camera mode in combat, edge panning, turn-based
+   mode) and a release build.
 
 ## Building the Windows version
 
