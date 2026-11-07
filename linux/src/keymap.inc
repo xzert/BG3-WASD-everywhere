@@ -39,7 +39,7 @@
 {"key:kp_multiply", 85},
 {"key:kp_plus", 87},
 {"key:kp_minus", 86},
-{"key:kp_period", 220},
+{"key:kp_period", 99},
 {"key:kp_divide", 84},
 {"key:f1", 58},
 {"key:f2", 59},
