@@ -1,5 +1,22 @@
 # BG3 WASD Everywhere
 
+## Support
+
+If the Linux or macOS port is useful to you, you can support its development:
+
+- Boosty: TODO add link
+- Tribute: TODO add link
+
+To support the original mod, see Ch4nKyy's
+[Nexus Mods page](https://www.nexusmods.com/baldursgate3/mods/781).
+
+## Trivia
+
+I really liked BG3WASD, until it broke on Linux: the game had moved to a native Linux build. Time
+went by, and the Hour Came: everything works on Linux again (and on macOS too).
+
+## About
+
 Direct character movement with WASD (or other keys) for Baldur's Gate 3: on Windows, on the native
 Linux build of the game and, as an early prototype, on the native macOS build for Apple Silicon.
 
@@ -47,7 +64,7 @@ Both ports support game version **4.1.1.7631656** (Hotfix #36).
 | Rotation turns off in menus, dialogs, loot and photo mode | ✅ | ✅ ² | ✅ ² |
 | No edge panning in Character mode | ✅ | ✅ | — |
 | Rotate + left click moves forward | ✅ | ✅ | ✅ |
-| Unclickable active character and camera occluders | ✅ | — | — |
+| Unclickable active character and camera occluders | ✅ | ✅ ⁵ | ✅ ⁵ |
 | Blocking click-to-move (`BlockInteractMove`) | ✅ | — | — |
 | Movement mode follows turn-based mode (FTB) | ✅ | ✅ | — |
 | Movement keys bound automatically | ✅ | ✅ ³ | ✅ ³ |
@@ -66,10 +83,12 @@ Notes on the Linux column:
 - ⁴ Combat is detected from the game's combat start and end events. If you load a save in the
   middle of a fight, the mod notices only at the next start or end, so press `ToggleMovementMode`
   yourself.
+- ⁵ The active character only (`PreventClickingActiveCharacter`); camera occluders not yet.
 
 Notes on the macOS column:
 
 - ¹ ² ³ As on Linux. Mouselook's pause in dialogs isn't checked in game yet.
+- ⁵ As on Linux.
 - The config has only the settings the port supports so far. Key names are the same as on Linux;
   on a Mac keyboard, `alt` is Option and `gui` is Command.
 
@@ -193,16 +212,6 @@ To fix Intellisense in VSCode, do the following:
 ### More documentation
 
 For more on architecture and reverse engineering, see the [doc](doc/) folder.
-
-## Support
-
-If the Linux or macOS port is useful to you, you can support its development:
-
-- Boosty: TODO add link
-- Tribute: TODO add link
-
-To support the original mod, see Ch4nKyy's
-[Nexus Mods page](https://www.nexusmods.com/baldursgate3/mods/781).
 
 ## Credits and license
 
