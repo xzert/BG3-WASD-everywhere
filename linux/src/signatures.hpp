@@ -74,4 +74,21 @@ struct CharacterCameraAddresses {
 bool FindCharacterCameraAddresses(const uint8_t* text, size_t size, uintptr_t text_address,
     uintptr_t is_in_controller_mode, CharacterCameraAddresses& out, std::string& error);
 
+// The unclickable active character (PreventClickingActiveCharacter). The game's picking skips
+// objects that ls::IsFading reports as fading out; the macOS build keeps these names.
+struct UnclickableCharacterAddresses {
+    // ls::IsFading(entity handle in rdi, world view in rsi, flag in dl) -> al. Its name says the
+    // handle is passed by reference, but the optimizer passes the value.
+    uintptr_t is_fading = 0;
+    // Its seven `call rel32` from ecl::PickingHelper. The other four (character highlights and sound
+    // occlusion) aren't included.
+    std::vector<uintptr_t> picking_calls;
+    // gui::GameUI::OnSelectedCharacterChanged(this, short player, const ecs::EntityRef*, bool); the
+    // EntityRef starts with the handle. The game calls it through a signal.
+    uintptr_t selected_character_changed = 0;
+};
+
+bool FindUnclickableCharacterAddresses(const uint8_t* text, size_t size, uintptr_t text_address,
+    UnclickableCharacterAddresses& out, std::string& error);
+
 }  // namespace wasd

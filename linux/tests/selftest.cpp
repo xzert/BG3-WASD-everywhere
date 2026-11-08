@@ -150,6 +150,18 @@ int main(int argc, char** argv)
             Hex(character_camera.edge_panning_jne), Hex(character_camera.bounds_call));
     }
 
+    wasd::UnclickableCharacterAddresses unclickable;
+    if (!wasd::FindUnclickableCharacterAddresses(text.data, text.size, text.address, unclickable, error)) {
+        std::printf("FAILED (unclickable character): %s\n", error.c_str());
+        ++failures;
+    } else {
+        std::printf("IsFading             %#lx, picking calls", Hex(unclickable.is_fading));
+        for (const uintptr_t call : unclickable.picking_calls) {
+            std::printf(" %#lx", Hex(call));
+        }
+        std::printf("\nOnSelectedCharacterChanged %#lx\n", Hex(unclickable.selected_character_changed));
+    }
+
     wasd::TelemetryCalls telemetry;
     if (!wasd::FindTelemetryCalls(text.data, text.size, text.address, rodata.data, rodata.size, rodata.address,
             telemetry, error)) {

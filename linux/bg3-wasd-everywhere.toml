@@ -95,8 +95,15 @@ IsCharacterMovementDefault = true
 # [true, false]
 
 
+PreventClickingActiveCharacter = true
+# If true, the cursor ignores the active character, in Character movement mode. This prevents
+# accidentally opening the context menu on them, or clicking your character instead of the
+# object or ground behind it. Vanilla is false.
+# [true, false]
+
+
 # Not available on Linux yet, and ignored if present:
-# PreventClickingActiveCharacter, PreventClickingCameraOccluders, BlockInteractMove.
+# PreventClickingCameraOccluders, BlockInteractMove.
 
 
 # List of all available keys for mod hotkeys:

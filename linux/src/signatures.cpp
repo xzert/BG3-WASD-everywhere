@@ -1,7 +1,9 @@
 #include "signatures.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <vector>
 
 namespace wasd {
@@ -206,6 +208,50 @@ bool FindRotationAddresses(const uint8_t* text, size_t size, uintptr_t text_addr
     }
     out.set_virtual_cursor_call = text_address + virtual_cursor[0] + 11;
     std::memcpy(&out.set_virtual_cursor_slot, text + virtual_cursor[0] + 13, sizeof out.set_virtual_cursor_slot);
+    return true;
+}
+
+bool FindUnclickableCharacterAddresses(const uint8_t* text, size_t size, uintptr_t text_address,
+    UnclickableCharacterAddresses& out, std::string& error)
+{
+    // IsFading: `test dl, dl ; jne`, then the handle's type index (`shr rax, 0x36`).
+    const auto fading = FindPattern(text, size,
+        "55 41 57 41 56 41 55 41 54 53 48 83 EC 58 49 89 FE 84 D2 0F 85 ?? ?? ?? ?? 4C 8B 16 4C 89 F0 48 89 74 24 "
+        "50 48 C1 E8 36");
+    // OnSelectedCharacterChanged keeps player, this, the bool and the EntityRef*, then reads +0x888.
+    const auto selected = FindPattern(text, size,
+        "55 41 57 41 56 41 55 41 54 53 48 83 EC 58 41 89 F4 48 89 3C 24 41 89 CE 49 89 D7 66 44 89 64 24 0E 48 8B "
+        "B7 88 08 00 00");
+    if (fading.size() != 1 || selected.size() != 1) {
+        error = "IsFading matched " + std::to_string(fading.size()) + " times, OnSelectedCharacterChanged " +
+            std::to_string(selected.size()) + ", expected 1 each";
+        return false;
+    }
+    out.is_fading = text_address + fading[0];
+    out.selected_character_changed = text_address + selected[0];
+
+    // Every `call IsFading`, without the sound occlusion callbacks (`xor al, 1` after the call) and the
+    // character highlights (`call [rax+0xA8] ; mov rdi, [rax]` just before it).
+    static constexpr uint8_t kHighlight[] = { 0xFF, 0x90, 0xA8, 0x00, 0x00, 0x00, 0x48, 0x8B, 0x38 };
+    int others = 0;
+    for (size_t i = 0; i + 7 <= size; ++i) {
+        if (text[i] != 0xE8 || static_cast<size_t>(RelTarget(text, i + 1, i + 5)) != fading[0]) {
+            continue;
+        }
+        const bool sound = text[i + 5] == 0x34 && text[i + 6] == 0x01;
+        const uint8_t* before = text + (i >= 16 ? i - 16 : 0);
+        const bool highlight = std::search(before, text + i, std::begin(kHighlight), std::end(kHighlight)) != text + i;
+        if (sound || highlight) {
+            ++others;
+        } else {
+            out.picking_calls.push_back(text_address + i);
+        }
+    }
+    if (out.picking_calls.size() != 7 || others != 4) {
+        error = "IsFading has " + std::to_string(out.picking_calls.size()) + " picking calls and " +
+            std::to_string(others) + " others, expected 7 and 4";
+        return false;
+    }
     return true;
 }
 

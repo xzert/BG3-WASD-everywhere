@@ -20,7 +20,40 @@ namespace ecs {
 struct EntityRef {
     uint64_t handle;
 };
+struct EntityHandleTraits;
+template <class... Components>
+class WorldView {};
 }  // namespace ecs
+
+namespace ls {
+template <class Traits>
+struct ID {
+    uint64_t value;
+};
+struct ConstructionTile;
+struct EffectComponent;
+struct FadingView0Component;
+struct FadingView1Component;
+struct InvisibleClimbingHelper;
+struct VisualComponent;
+using FadingView = ecs::WorldView<const ConstructionTile, const EffectComponent, const FadingView0Component,
+    const FadingView1Component, const InvisibleClimbingHelper, const VisualComponent>;
+}  // namespace ls
+
+// The game's picking skips objects that fade out; nothing fades in the stand-in. The game's name says
+// ID const&, but its optimizer passes the handle itself, so the stand-in does the same under that name.
+bool StandinIsFading(uint64_t entity, const ls::FadingView& view, signed char flag) __asm__(
+    "__ZN2ls8IsFadingERKNS_2IDIN3ecs18EntityHandleTraitsEEERKNS1_9WorldViewIJKNS_16ConstructionTileEKNS_15EffectComponentEKNS_20FadingView0ComponentEKNS_20FadingView1ComponentEKNS_23InvisibleClimbingHelperEKNS_15VisualComponentEEEEa");
+
+namespace ecl {
+class PickingHelper {
+public:
+    void DoPick();
+
+    uint64_t target = 0;
+    bool fading = false;
+};
+}  // namespace ecl
 
 namespace ls {
 struct InputEvent {
@@ -104,6 +137,7 @@ public:
     virtual bool IsTextInputElementFocused() const;
     virtual void Update(const ls::AnyView& view, const ls::GameTime& time);
     virtual void OnIsGameMenuOpenChanged(short player, bool open);
+    void OnSelectedCharacterChanged(short player, const ecs::EntityRef& character, bool flag);
 
     bool text_field_focused = false;
     int updates = 0;
@@ -194,6 +228,29 @@ gui::GameUI::~GameUI() {}
 bool gui::GameUI::IsTextInputElementFocused() const { return text_field_focused; }
 void gui::GameUI::Update(const ls::AnyView& view, const ls::GameTime&) { updates += view.id; }
 void gui::GameUI::OnIsGameMenuOpenChanged(short, bool) { ++menu_changes; }
+void gui::GameUI::OnSelectedCharacterChanged(short, const ecs::EntityRef&, bool) {}
+
+namespace {
+const ls::FadingView g_fading_view;
+int g_is_fading_calls = 0;
+
+// IsFading asked from outside the picking code, like the game's character highlights.
+bool IsFadingElsewhere(uint64_t entity)
+{
+    return StandinIsFading(entity, g_fading_view, 0);
+}
+}  // namespace
+
+bool StandinIsFading(uint64_t, const ls::FadingView&, signed char)
+{
+    ++g_is_fading_calls;
+    return false;
+}
+
+void ecl::PickingHelper::DoPick()
+{
+    fading = StandinIsFading(target, g_fading_view, 0);
+}
 
 void ecl::GameAnalyticsSystem::RecordDialogStart(const Character*, const char*, const ls::STDString&, bool) const
 {
@@ -600,6 +657,37 @@ int main(int argc, char** argv)
         expect_presses(6, 6, "mouselook off");
         [frames invalidate];
         g_simulated_camera = nullptr;
+
+        // The active character is unclickable in Character mode: IsFading says it fades out when the
+        // picking code asks, and only then.
+        ui->OnSelectedCharacterChanged(0, ecs::EntityRef{ 0x1234 }, true);
+        ecl::PickingHelper picking;
+        auto pick = [&](uint64_t entity) {
+            picking.target = entity;
+            picking.DoPick();
+            return picking.fading;
+        };
+        const int fading_calls = g_is_fading_calls;
+        if (!pick(0x1234) || pick(0x5678) || IsFadingElsewhere(0x1234)) {
+            std::printf("unclickable character: the active one is %s, another %s, outside picking %s\n",
+                pick(0x1234) ? "skipped" : "NOT skipped", pick(0x5678) ? "SKIPPED" : "not skipped",
+                IsFadingElsewhere(0x1234) ? "SKIPPED" : "not skipped");
+            ++failures;
+        }
+        if (g_is_fading_calls - fading_calls != 2) {
+            std::printf("IsFading reached the game %d times, not 2\n", g_is_fading_calls - fading_calls);
+            ++failures;
+        }
+        modifiers(kCapsLock, 0);  // Camera mode: the active character is clickable again
+        if (pick(0x1234)) {
+            std::printf("unclickable character: skipped in Camera mode\n");
+            ++failures;
+        }
+        modifiers(kCapsLock, NSEventModifierFlagCapsLock);
+        if (!pick(0x1234)) {
+            std::printf("unclickable character: not skipped back in Character mode\n");
+            ++failures;
+        }
 
         std::printf("stand-in: %s\n", failures ? "FAILED" : "every call returned the right values");
         return failures ? 1 : 0;

@@ -106,6 +106,7 @@ std::atomic<RotationCursor> g_cursor_camera{ RotationCursor::Invisible };
 std::atomic<bool> g_rotate_plus_left_click{ true };
 bool g_rotate_input_is_left_click = false;  // CameraToggleMouseRotate includes the left button
 std::atomic<bool> g_mode_toggles_mouselook{ false };  // TogglingMovementModeAlsoTogglesCameraRotation
+std::atomic<bool> g_prevent_clicking_character{ true };  // PreventClickingActiveCharacter
 
 // Main thread only, like sendEvent:.
 bool g_autoforward = false;
@@ -212,6 +213,7 @@ void LoadSettings(bool first)
     g_cursor_camera = ParseRotationCursor(settings.rotation_cursor_in_camera_mode);
     g_rotate_plus_left_click = settings.rotate_plus_lmb_is_forward;
     g_mode_toggles_mouselook = settings.toggling_movement_mode_also_toggles_camera_rotation;
+    g_prevent_clicking_character = settings.prevent_clicking_active_character;
     if (first) {
         g_mode_toggled = settings.is_character_movement_default;
         g_walking_toggled = settings.is_walking_default;
@@ -1209,6 +1211,101 @@ void InstallMouselook(const uintptr_t* addresses)
         dialogs_hooked ? "hooked" : "not hooked");
 }
 
+// --- Unclickable active character -------------------------------------------------------------
+//
+// PreventClickingActiveCharacter, like PreventClickingActiveCharacterHook on Windows: in Character
+// mode the cursor ignores the active character, so a click goes to the ground or object behind it.
+// The game's picking skips objects that ls::IsFading reports as fading out; for the active
+// character it now reports so when ecl::PickingHelper asks. Other callers (character highlights,
+// sound occlusion) get the game's answer. The active character comes from
+// gui::GameUI::OnSelectedCharacterChanged.
+
+std::atomic<uint64_t> g_active_character{ 0 };  // its entity handle
+struct CodeRange {
+    uintptr_t start, end;
+};
+constexpr int kPickingFunctions = symbols::PickingForEachSelectableTarget - symbols::PickGameObject + 1;
+CodeRange g_picking_code[kPickingFunctions] = {};
+
+using ForwardFn = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+ForwardFn g_is_fading = nullptr;
+ForwardFn g_on_selected_character_changed = nullptr;
+
+bool IsPickingCode(uintptr_t address)
+{
+    for (const CodeRange& range : g_picking_code) {
+        if (address >= range.start && address < range.end) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Picking runs on worker threads: only atomics here. Although its name says ID const&, the game's
+// optimizer passes the entity handle itself in x0: every caller loads it with `ldr x0, [...]`.
+uint64_t IsFadingHook(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6,
+    uint64_t a7)
+{
+    const auto caller = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+    const uint64_t character = g_active_character.load(std::memory_order_relaxed);
+    if (!character || a0 != character || !IsPickingCode(caller)) {
+        return g_is_fading(a0, a1, a2, a3, a4, a5, a6, a7);
+    }
+    // What the picking code hears about the active character, logged when it changes.
+    static std::atomic<int> last_state{ -1 };
+    const bool skip = g_prevent_clicking_character && IsCharacterMode() && !IsControllerMode();
+    const uint64_t result = skip ? 1 : g_is_fading(a0, a1, a2, a3, a4, a5, a6, a7);
+    const int state = (IsCharacterMode() ? 4 : 0) | (skip ? 2 : 0) | int(result & 1);
+    if (last_state.exchange(state) != state) {
+        LOG_INFO("Picking asks about the active character in %s mode: %s",
+            IsCharacterMode() ? "Character" : "Camera",
+            skip ? "skipped by the mod" : (result & 1) ? "the game says it fades out" : "clickable");
+    }
+    return result;
+}
+
+// OnSelectedCharacterChanged(this, short player, ecs::EntityRef const& character, bool): the
+// EntityRef starts with the entity handle.
+uint64_t SelectedCharacterHook(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5,
+    uint64_t a6, uint64_t a7)
+{
+    if (a2) {
+        const uint64_t character = *reinterpret_cast<const uint64_t*>(a2);
+        if (g_active_character.exchange(character) != character) {
+            LOG_INFO("Active character %#llx (player %d)", (unsigned long long)character, int(int16_t(a1)));
+        }
+    }
+    return g_on_selected_character_changed(a0, a1, a2, a3, a4, a5, a6, a7);
+}
+
+void InstallUnclickableCharacter(const macho::Image& image, const uintptr_t* addresses)
+{
+    int ranges = 0;
+    for (int i = 0; i < kPickingFunctions; ++i) {
+        const uintptr_t start = addresses[symbols::PickGameObject + i];
+        const uintptr_t end = start ? macho::NextSymbolAddress(image, start) : 0;
+        if (start && end > start) {
+            g_picking_code[i] = { start, end };
+            ++ranges;
+        }
+    }
+    const uintptr_t is_fading = addresses[symbols::IsFading];
+    const uintptr_t selected = addresses[symbols::OnSelectedCharacterChanged];
+    if (!ranges || !is_fading || !selected) {
+        LOG_WARN("The active character stays clickable: picking functions not found");
+        return;
+    }
+    if (!InlineHook("OnSelectedCharacterChanged", selected, reinterpret_cast<uintptr_t>(&SelectedCharacterHook),
+            reinterpret_cast<void**>(&g_on_selected_character_changed)) ||
+        !InlineHook("IsFading", is_fading, reinterpret_cast<uintptr_t>(&IsFadingHook),
+            reinterpret_cast<void**>(&g_is_fading))) {
+        LOG_WARN("The active character stays clickable");
+        return;
+    }
+    LOG_INFO("Unclickable active character: %d picking functions, %s", ranges,
+        g_prevent_clicking_character ? "on" : "off in the config");
+}
+
 void OnModeChanged(bool was_character, id application, NSEvent* source)
 {
     const bool character = IsCharacterMode();
@@ -1549,6 +1646,7 @@ void Run()
     InstallTextInputCheck(addresses);
     InstallRotationHooks(addresses);
     InstallMouselook(addresses);
+    InstallUnclickableCharacter(image, addresses);
 
     if (SwizzleSendEvent()) {
         LOG_INFO("Hotkeys enabled (-[BG3Application sendEvent:])");

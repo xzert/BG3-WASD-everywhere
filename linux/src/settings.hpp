@@ -24,6 +24,8 @@ struct Settings {
     bool auto_toggle_movement_mode = true;
     bool walk_after_combat = false;
     bool rotate_plus_lmb_is_forward = true;
+    // macOS only so far.
+    bool prevent_clicking_active_character = true;
 };
 
 // Reads `path`; keys that are missing keep their defaults. Returns false if the file can't be read.

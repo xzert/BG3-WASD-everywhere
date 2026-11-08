@@ -61,6 +61,12 @@ an error and stays inactive.
   - Rebinding: the Windows mod re-patches after keybinding changes in the game's menu; here, restart
     the game.
   - Check offline: `./build/selftest --inputconfig <file> <output>`.
+- `PreventClickingActiveCharacter`: in Character mode the cursor ignores the active character, as on
+  Windows. The game's picking skips objects that `ls::IsFading` reports as fading out; the mod
+  redirects the seven calls of it from the picking code and answers "fading" for the active
+  character. Character highlights and sound occlusion call it too and keep the game's answer. The
+  active character comes from `gui::GameUI::OnSelectedCharacterChanged`. Both names come from the
+  macOS build, which keeps them.
 
 ## Not ported yet
 
@@ -68,7 +74,7 @@ an error and stays inactive.
   - mouselook doesn't pause by itself for the loot window and photo mode;
   - the crosshair icon for `centered`.
 - Hotkeys still work while menus are open. They are ignored only while you type into a text field.
-- No interact-move blocker and no unclickable active character.
+- No interact-move blocker, and camera occluders stay clickable (`PreventClickingCameraOccluders`).
 
 ## Known issues
 

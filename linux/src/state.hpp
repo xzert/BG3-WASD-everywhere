@@ -24,6 +24,8 @@ struct State {
     std::atomic<bool> rotate_plus_lmb_is_forward{ true };
     std::atomic<bool> rotate_keys_include_lmb{ false };  // from the game's key bindings
     std::atomic<bool> mode_toggles_mouselook{ false };   // TogglingMovementModeAlsoTogglesCameraRotation
+    std::atomic<bool> prevent_clicking_active_character{ true };
+    std::atomic<uint64_t> active_character{ 0 };  // its entity handle, from OnSelectedCharacterChanged
 
     // When the game last asked for the movement input (it does so every frame while the player can move).
     std::atomic<int64_t> last_movement_poll_ms{ 0 };

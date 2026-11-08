@@ -53,6 +53,10 @@ An early port for the native macOS game on Apple Silicon. Supported game version
   - The game takes every mouse button but the left and the right one as its middle button. So a
     mouse button bound to `ToggleCameraRotation` doesn't reach the game, and while the mod holds the
     rotate input, the player's own presses of it don't either.
+- `PreventClickingActiveCharacter`: in Character mode the cursor ignores the active character, as on
+  Windows. The game's picking skips objects that `ls::IsFading` reports as fading out; the library
+  makes it report so for the active character when `ecl::PickingHelper` asks, and only then. The
+  active character comes from `gui::GameUI::OnSelectedCharacterChanged`.
 - The movement keys are bound in `inputconfig_p1.json` of every player profile in
   `~/Documents/Larian Studios/Baldur's Gate 3/PlayerProfiles/`. It uses the same patcher as the Linux
   port, and keeps the original as `inputconfig_p1.json.bg3-wasd-everywhere.bak` before changing it.

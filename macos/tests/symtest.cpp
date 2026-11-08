@@ -266,7 +266,8 @@ bool CheckSlice(const std::vector<uint8_t>& file, uint32_t cputype, const char* 
         // functions, so those must not be PC-relative.
         for (int index : { int(symbols::GetRotatedInput), int(symbols::AddForcedMouseCursor),
                  int(symbols::RemoveForcedMouseCursor), int(symbols::RecordDialogStart),
-                 int(symbols::RecordDialogEnd), int(symbols::GetInputValue), int(symbols::OnIsGameMenuOpenChanged) }) {
+                 int(symbols::RecordDialogEnd), int(symbols::IsFading), int(symbols::OnSelectedCharacterChanged),
+                 int(symbols::GetInputValue), int(symbols::OnIsGameMenuOpenChanged) }) {
             const uint64_t at = macho::FileOffset(image.header, addresses[index]);
             uint32_t words[4] = {};
             if (at && at + sizeof words <= size) {
@@ -280,7 +281,8 @@ bool CheckSlice(const std::vector<uint8_t>& file, uint32_t cputype, const char* 
                 words[3], movable ? "movable" : "PC-relative", symbols::kNames[index]);
             if (index == symbols::GetRotatedInput || index == symbols::AddForcedMouseCursor ||
                 index == symbols::RemoveForcedMouseCursor || index == symbols::RecordDialogStart ||
-                index == symbols::RecordDialogEnd) {
+                index == symbols::RecordDialogEnd || index == symbols::IsFading ||
+                index == symbols::OnSelectedCharacterChanged) {
                 ok = ok && movable;
             }
         }

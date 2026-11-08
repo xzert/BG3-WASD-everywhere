@@ -1,6 +1,6 @@
 # Builds the Linux port of BG3 WASD Everywhere: an LD_PRELOAD library plus a signature self-test.
 NAME := bg3-wasd-everywhere
-VERSION := 0.2.0
+VERSION := 0.3.0-dev
 BUILD := build
 LIBRARY := $(BUILD)/lib$(NAME).so
 CONFIG := $(BUILD)/$(NAME).toml

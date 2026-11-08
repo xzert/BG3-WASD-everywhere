@@ -104,6 +104,7 @@ void ReloadSettings()
     state.walk_after_combat = settings.walk_after_combat;
     state.rotate_plus_lmb_is_forward = settings.rotate_plus_lmb_is_forward;
     state.mode_toggles_mouselook = settings.toggling_movement_mode_also_toggles_camera_rotation;
+    state.prevent_clicking_active_character = settings.prevent_clicking_active_character;
     input::SetBindings(settings);
     camera::SetRotationCursors(camera::ParseRotationCursor(settings.rotation_cursor_in_character_mode),
         camera::ParseRotationCursor(settings.rotation_cursor_in_camera_mode));

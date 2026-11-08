@@ -87,6 +87,8 @@ struct RegisterPair {
 };
 using ExecuteCameraCommandFn = RegisterPair (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 
+void InstallUnclickableCharacter(const mem::MainExecutable& exe);
+
 constexpr uint32_t kCameraBackward = 99;
 constexpr uint32_t kCameraRight = 102;
 
@@ -335,7 +337,77 @@ bool Install()
     }
     camera::InstallCharacterModeCamera(exe, game.is_in_controller_mode);
     InstallGameEvents(exe);
+    InstallUnclickableCharacter(exe);
     return true;
+}
+
+// Unclickable active character, like PreventClickingActiveCharacterHook on Windows: in Character mode
+// the picking code hears that the active character fades out, so the cursor ignores it. Only the
+// picking code's calls of IsFading are redirected; character highlights and sound occlusion keep the
+// game's answer. Picking runs on worker threads: only atomics here.
+using IsFadingFn = bool (*)(uint64_t entity, const void* view, int flag);
+IsFadingFn g_is_fading = nullptr;
+RegisterPair (*g_selected_character_changed)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) = nullptr;
+
+bool PickingIsFadingHook(uint64_t entity, const void* view, int flag)
+{
+    const State& state = GetState();
+    if (entity && entity == state.active_character.load(std::memory_order_relaxed) &&
+        state.prevent_clicking_active_character && state.IsCharacterMovementMode() && !state.IsInControllerMode()) {
+        static std::atomic<bool> logged{ false };
+        if (!logged.exchange(true)) {
+            LOG_INFO("Active character skipped by picking");
+        }
+        return true;
+    }
+    return g_is_fading(entity, view, flag);
+}
+
+// OnSelectedCharacterChanged(this, short player, const ecs::EntityRef* character, bool).
+RegisterPair SelectedCharacterHook(uint64_t self, uint64_t player, uint64_t character, uint64_t flag, uint64_t a4,
+    uint64_t a5)
+{
+    if (character) {
+        const uint64_t handle = *reinterpret_cast<const uint64_t*>(character);
+        if (GetState().active_character.exchange(handle) != handle) {
+            LOG_INFO("Active character %#llx (player %d)", static_cast<unsigned long long>(handle),
+                static_cast<int>(static_cast<int16_t>(player)));
+        }
+    }
+    return g_selected_character_changed(self, player, character, flag, a4, a5);
+}
+
+void InstallUnclickableCharacter(const mem::MainExecutable& exe)
+{
+    auto file_address = [&](uintptr_t address) { return static_cast<unsigned long>(address - exe.load_bias); };
+    UnclickableCharacterAddresses addresses;
+    std::string error;
+    if (!FindUnclickableCharacterAddresses(reinterpret_cast<const uint8_t*>(exe.code.start), exe.code.size,
+            exe.code.start, addresses, error)) {
+        LOG_WARN("The active character stays clickable: %s", error.c_str());
+        return;
+    }
+    void* stub = mem::MakeJumpStub(exe.code.start, reinterpret_cast<const void*>(&PickingIsFadingHook));
+    // push rbp ; push r15 ; push r14: whole instructions, nothing position-dependent.
+    static constexpr uint8_t kSelectedEntry[] = { 0x55, 0x41, 0x57, 0x41, 0x56 };
+    if (!stub || !mem::HookEntry(addresses.selected_character_changed, kSelectedEntry, sizeof kSelectedEntry,
+                     reinterpret_cast<const void*>(&SelectedCharacterHook),
+                     reinterpret_cast<void**>(&g_selected_character_changed))) {
+        LOG_WARN("The active character stays clickable: could not hook OnSelectedCharacterChanged");
+        return;
+    }
+    g_is_fading = reinterpret_cast<IsFadingFn>(addresses.is_fading);
+    int redirected = 0;
+    for (const uintptr_t site : addresses.picking_calls) {
+        if (mem::RedirectCall(site, stub) == addresses.is_fading) {
+            ++redirected;
+        } else {
+            LOG_WARN("Could not hook the IsFading call at %#lx", file_address(site));
+        }
+    }
+    LOG_INFO("Unclickable active character: IsFading %#lx, %d of %zu picking calls, OnSelectedCharacterChanged %#lx",
+        file_address(addresses.is_fading), redirected, addresses.picking_calls.size(),
+        file_address(addresses.selected_character_changed));
 }
 
 // Runs in every process that inherits LD_PRELOAD (Steam's launch wrappers, the crash handler, ...),

@@ -22,6 +22,16 @@ enum Index {
     Core,                      // gCore: the game's cursor position is the first two floats it points to
     RecordDialogStart,         // ecl::GameAnalyticsSystem::RecordDialogStart(ecl::Character const*, char const*, ls::STDString const&, bool) const
     RecordDialogEnd,           // ecl::GameAnalyticsSystem::RecordDialogEnd(ecl::Character const*, ls::FixedString const&, ls::STDString const&, bool) const
+    IsFading,                  // ls::IsFading(ls::ID<ecs::EntityHandleTraits> const&, ecs::WorldView<...> const&, signed char)
+    OnSelectedCharacterChanged,  // gui::GameUI::OnSelectedCharacterChanged(short, ecs::EntityRef const&, bool)
+    // The picking code that asks IsFading, in ecl::PickingHelper.
+    PickGameObject,
+    PickPlaceable,
+    PickWalkable,
+    PickScenery,
+    PickingDoPick,
+    PickingUpdate,
+    PickingForEachSelectableTarget,
     Count
 };
 
@@ -41,6 +51,15 @@ inline constexpr const char* kNames[Count] = {
     "_gCore",
     "__ZNK3ecl19GameAnalyticsSystem17RecordDialogStartEPKNS_9CharacterEPKcRKN2ls9STDStringEb",
     "__ZNK3ecl19GameAnalyticsSystem15RecordDialogEndEPKNS_9CharacterERKN2ls11FixedStringERKNS4_9STDStringEb",
+    "__ZN2ls8IsFadingERKNS_2IDIN3ecs18EntityHandleTraitsEEERKNS1_9WorldViewIJKNS_16ConstructionTileEKNS_15EffectComponentEKNS_20FadingView0ComponentEKNS_20FadingView1ComponentEKNS_23InvisibleClimbingHelperEKNS_15VisualComponentEEEEa",
+    "__ZN3gui6GameUI26OnSelectedCharacterChangedEsRKN3ecs9EntityRefEb",
+    "__ZN3ecl13PickingHelper14GameObjectPick15ExecuteWTKernelEv",
+    "__ZN3ecl13PickingHelper13PlaceablePick15ExecuteWTKernelEv",
+    "__ZN3ecl13PickingHelper12WalkablePick15ExecuteWTKernelEv",
+    "__ZN3ecl13PickingHelper11SceneryPick15ExecuteWTKernelEv",
+    "__ZN3ecl13PickingHelper6DoPickEv",
+    "__ZN3ecl13PickingHelper6UpdateERKN2ls8GameTimeE",
+    "__ZN2ls8FunctionIFbNS_10PhysicsHitEEE18FunctorMethodsHeapIZN3ecl13PickingHelper23ForEachSelectableTargetERKNS_8GameTimeEPKNS5_9CharacterEbbNS0_IFvRN3ecs9EntityRefEEEEE3$_5E4CallERNS3_7StorageES1_",
 };
 
 // A vtable symbol points at the offset-to-top entry; virtual function slots start 16 bytes later.
