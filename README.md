@@ -7,8 +7,16 @@ If the Linux or macOS port is useful to you, you can support its development:
 - Boosty: TODO add link
 - Tribute: TODO add link
 
-To support the original mod, see Ch4nKyy's
-[Nexus Mods page](https://www.nexusmods.com/baldursgate3/mods/781).
+## Thanks
+
+The ports stand on the work of two authors. If you enjoy them, thank and support the originals too:
+
+- **Ch4nKyy**, for [BG3WASD](https://github.com/Ch4nKyy/BG3WASD)
+  ([Nexus Mods](https://www.nexusmods.com/baldursgate3/mods/781)): the WASD movement, the camera
+  rotation and the reverse engineering that the ports build on.
+- **ersh1**, for [Native Camera Tweaks](https://github.com/ersh1/BG3_NativeCameraTweaks)
+  ([Nexus Mods](https://www.nexusmods.com/baldursgate3/mods/945)): the free camera pitch, zoom and
+  the other camera tweaks.
 
 ## Trivia
 
@@ -30,6 +38,10 @@ load there, so the port is a separate `LD_PRELOAD` library in [`linux/`](linux/)
 
 The fork also starts a port for the native macOS version on Apple Silicon, in [`macos/`](macos/).
 It is a library that a small launcher loads into the game when Steam starts it.
+
+The Linux port also includes the camera tweaks of
+[Native Camera Tweaks](https://github.com/ersh1/BG3_NativeCameraTweaks) by ersh1, which most
+players use together with BG3WASD: a free camera pitch, wider zoom limits, FOV and offsets.
 
 ## Which version do I need?
 
@@ -65,6 +77,7 @@ Both ports support game version **4.1.1.7631656** (Hotfix #36).
 | No edge panning in Character mode | ✅ | ✅ | — |
 | Rotate + left click moves forward | ✅ | ✅ | ✅ |
 | Unclickable active character and camera occluders | ✅ | ✅ ⁵ | ✅ ⁵ |
+| Camera tweaks: free pitch, zoom limits, FOV, offsets ([Native Camera Tweaks](https://www.nexusmods.com/baldursgate3/mods/945)) | separate mod | ✅ ⁶ | — |
 | Blocking click-to-move (`BlockInteractMove`) | ✅ | — | — |
 | Movement mode follows turn-based mode (FTB) | ✅ | ✅ | — |
 | Movement keys bound automatically | ✅ | ✅ ³ | ✅ ³ |
@@ -85,6 +98,10 @@ Notes on the Linux column:
   yourself.
 - ⁵ The active character (`PreventClickingActiveCharacter`) and camera occluders
   (`PreventClickingCameraOccluders`).
+- ⁶ Built in and on by default (`CameraTweaks`), with the same config keys as Native Camera Tweaks.
+  Not ported yet: the gamepad settings, keeping the camera above the floor and keeping the zoom on a
+  zone change. Without the floor check, the free pitch stops at 0 (looking straight ahead) by
+  default.
 
 Notes on the macOS column:
 
@@ -218,6 +235,9 @@ For more on architecture and reverse engineering, see the [doc](doc/) folder.
 
 - The original BG3WASD is by [Ch4nKyy](https://github.com/Ch4nKyy/BG3WASD); the Windows mod,
   the reverse engineering guide in [doc/](doc/) and the game knowledge the port builds on are theirs.
+- The camera tweaks in the Linux and macOS ports are a port of
+  [BG3_NativeCameraTweaks](https://github.com/ersh1/BG3_NativeCameraTweaks) by
+  [ersh1](https://github.com/ersh1) (GPL-3.0-or-later); the design and the game knowledge are theirs.
 - The Linux and macOS ports are by [xzert](https://github.com/xzert).
 
 Licensed under GPL-3.0, like the original. See [LICENSE](LICENSE). This fork changes the original

@@ -11,6 +11,7 @@
 #include <thread>
 
 #include "camera.hpp"
+#include "camera_tweaks.hpp"
 #include "input.hpp"
 #include "log.hpp"
 #include "state.hpp"
@@ -106,6 +107,7 @@ void ReloadSettings()
     state.mode_toggles_mouselook = settings.toggling_movement_mode_also_toggles_camera_rotation;
     state.prevent_clicking_active_character = settings.prevent_clicking_active_character;
     state.prevent_clicking_camera_occluders = settings.prevent_clicking_camera_occluders;
+    camera_tweaks::Configure(settings.camera_tweaks);
     input::SetBindings(settings);
     camera::SetRotationCursors(camera::ParseRotationCursor(settings.rotation_cursor_in_character_mode),
         camera::ParseRotationCursor(settings.rotation_cursor_in_camera_mode));

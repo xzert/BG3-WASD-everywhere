@@ -74,6 +74,23 @@ an error and stays inactive.
   `phx::PhysXScene::RaycastAll` with a stub that moves its start; the camera
   (`ecl::GameCameraBehavior`) comes from `GetCameraPitchDegrees`, which the camera update calls
   every frame.
+- Camera tweaks (`CameraTweaks`, on by default), ported from
+  [Native Camera Tweaks](https://github.com/ersh1/BG3_NativeCameraTweaks) by ersh1. The config keys
+  are the same as in `BG3NativeCameraTweaks.toml`.
+  - A free camera pitch: move the mouse up and down while you rotate the camera, mouselook included.
+    The camera update asks `GetCameraPitchDegrees` for the pitch the camera turns to; for that one
+    call (found by its return address) the mod answers with its own pitch, and sets the game's pitch
+    speed so the camera follows at once.
+  - The game's camera settings (`eoc::CameraSettings`): zoom limits (0.5 to 20 by default), the locked
+    pitch, FOV and offsets, for the exploration and the combat camera. They are found through the
+    same code; on Linux their offsets are 0x28 higher than on Windows.
+  - Zoom and keyboard rotation speed: inside `ExecuteCameraCommand`, the two instructions that write
+    the speed into the camera call the mod instead, which multiplies the speed and writes it. The game
+    picks the camera, so the speed lands in the one the command is for. The mouse rotation input is
+    multiplied in the `ExecuteCameraCommand` hook.
+  - Not ported: the gamepad settings, keeping the camera above the floor
+    (`UnlockedPitchLimitClipping`) and keeping the zoom on a zone change (`ResetZoomOnZoneChange`).
+    Without the floor check, the pitch limit defaults to 0 rather than -85.
 
 ## Not ported yet
 
@@ -82,6 +99,8 @@ an error and stays inactive.
   - the crosshair icon for `centered`.
 - Hotkeys still work while menus are open. They are ignored only while you type into a text field.
 - No interact-move blocker.
+- From the camera tweaks: the gamepad settings, the floor check and keeping the zoom on a zone
+  change.
 
 ## Known issues
 

@@ -12,6 +12,7 @@
 #include <string>
 
 #include "camera.hpp"
+#include "camera_tweaks.hpp"
 #include "input.hpp"
 #include "inputconfig.hpp"
 #include "log.hpp"
@@ -20,8 +21,17 @@
 #include "signatures.hpp"
 #include "state.hpp"
 
-// The picking ray hook, written in assembly at the end of this file.
+// The picking ray hook and the camera speed stores, written in assembly at the end of this file.
 extern "C" __attribute__((visibility("hidden"))) void wasd_RaycastSiteStub();
+extern "C" __attribute__((visibility("hidden"))) void wasd_ZoomSpeedStub();
+extern "C" __attribute__((visibility("hidden"))) void wasd_RotationSpeedStub();
+
+// The multipliers the speed stores apply (camera tweaks). BlockCameraMoveCommands sets them before
+// each camera command, on the thread that runs the command and the stores.
+extern "C" {
+__attribute__((visibility("hidden"))) float wasd_zoom_speed_mult = 1.0f;
+__attribute__((visibility("hidden"))) float wasd_rotation_speed_mult = 1.0f;
+}
 
 namespace wasd {
 namespace {
@@ -92,7 +102,7 @@ struct RegisterPair {
 using ExecuteCameraCommandFn = RegisterPair (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 
 void InstallUnclickableCharacter(const mem::MainExecutable& exe);
-void InstallCameraOccluders(const mem::MainExecutable& exe);
+void InstallCameraFeatures(const mem::MainExecutable& exe, uintptr_t execute_camera_command);
 
 constexpr uint32_t kCameraBackward = 99;
 constexpr uint32_t kCameraRight = 102;
@@ -110,6 +120,11 @@ RegisterPair BlockCameraMoveCommands(uint64_t self, uint64_t context, uint64_t c
         state.IsCharacterMovementMode() && !state.in_combat && !state.IsInControllerMode()) {
         *command_id = 0;
     }
+    // Zoom and rotation speed (camera tweaks), applied by the speed stores inside the command.
+    const camera_tweaks::CommandSpeed speed =
+        camera_tweaks::BeforeCameraCommand(reinterpret_cast<uint8_t*>(command), state.IsInControllerMode());
+    wasd_zoom_speed_mult = speed.zoom;
+    wasd_rotation_speed_mult = speed.keyboard_rotation;
     return g_execute_camera_command(self, context, command, a3, a4, a5);
 }
 
@@ -126,14 +141,23 @@ void OnGameEvent(uint64_t name)
     State& state = GetState();
     const bool auto_toggle = state.auto_toggle_movement_mode;
     const int64_t now = NowMs();
-    if (name == g_telemetry.strings[TelemetryCalls::CombatStart]) {
+    // The game sends a combat event once per combatant, so a fight with 16 combatants starts 16
+    // times within a moment. Repeats that soon are dropped. Later ones still count: the state can
+    // be stale, e.g. after loading a save made outside combat while in combat.
+    const bool combat_start = name == g_telemetry.strings[TelemetryCalls::CombatStart];
+    const bool combat_end = name == g_telemetry.strings[TelemetryCalls::CombatEnd];
+    const bool repeat = (combat_start && state.in_combat) || (combat_end && !state.in_combat);
+    if (repeat && now - state.last_combat_change_ms < 2000) {
+        return;
+    }
+    if (combat_start) {
         state.in_combat = true;
         state.last_combat_change_ms = now;
         LOG_INFO("Combat started");
         if (auto_toggle) {
             state.SetMovementModeToggled(false);
         }
-    } else if (name == g_telemetry.strings[TelemetryCalls::CombatEnd]) {
+    } else if (combat_end) {
         state.in_combat = false;
         state.last_combat_change_ms = now;
         LOG_INFO("Combat ended");
@@ -144,7 +168,7 @@ void OnGameEvent(uint64_t name)
             state.walking_toggled = true;
         }
     }
-    if (name == g_telemetry.strings[TelemetryCalls::CombatStart] || name == g_telemetry.strings[TelemetryCalls::CombatEnd]) {
+    if (combat_start || combat_end) {
         camera::UpdateCharacterModeCamera();  // the mode may not have changed, but combat did
     } else if (name == g_telemetry.strings[TelemetryCalls::FtbStart]) {
         LOG_INFO("Turn-based mode started");
@@ -343,7 +367,8 @@ bool Install()
     camera::InstallCharacterModeCamera(exe, game.is_in_controller_mode);
     InstallGameEvents(exe);
     InstallUnclickableCharacter(exe);
-    InstallCameraOccluders(exe);
+    // The camera speed stores only work through the ExecuteCameraCommand hook.
+    InstallCameraFeatures(exe, g_execute_camera_command ? reinterpret_cast<uintptr_t>(g_execute_camera_command) : 0);
     return true;
 }
 
@@ -423,9 +448,14 @@ void InstallUnclickableCharacter(const mem::MainExecutable& exe)
 // wasd_AdjustRayStart for the start; the camera comes from GetCameraPitchDegrees.
 using CameraPitchFn = float (*)(const uint8_t* camera, bool a, bool b);
 CameraPitchFn g_camera_pitch = nullptr;
+// The return address of the camera update's call, the pitch the camera turns to (camera tweaks).
+uintptr_t g_pitch_update_return = 0;
 
+// Shared by the camera occluders and the camera tweaks. The entry hook jumps here, so the return
+// address is the game's caller.
 float CameraPitchHook(const uint8_t* camera, bool a, bool b)
 {
+    const auto caller = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
     // It runs for more than one camera, and some may have a NaN or zero zoom and pitch. Like
     // State::IsCameraValid on Windows, keep the last camera with sane values.
     if (camera) {
@@ -436,23 +466,32 @@ float CameraPitchHook(const uint8_t* camera, bool a, bool b)
             GetState().camera.store(camera, std::memory_order_relaxed);
         }
     }
-    return g_camera_pitch(camera, a, b);
+    const float pitch = g_camera_pitch(camera, a, b);
+    if (g_pitch_update_return && caller == g_pitch_update_return) {
+        return camera_tweaks::OnUpdatePitch(const_cast<uint8_t*>(camera), pitch, camera::IsRotating(),
+            GetState().IsInControllerMode());
+    }
+    return pitch;
 }
 
-void InstallCameraOccluders(const mem::MainExecutable& exe)
+// GetCameraPitchDegrees is hooked once, for whichever feature asks first.
+bool HookCameraPitch(uintptr_t camera_pitch)
 {
-    auto file_address = [&](uintptr_t address) { return static_cast<unsigned long>(address - exe.load_bias); };
-    OccluderAddresses addresses;
-    std::string error;
-    if (!FindOccluderAddresses(reinterpret_cast<const uint8_t*>(exe.code.start), exe.code.size, exe.code.start,
-            addresses, error)) {
-        LOG_WARN("Camera occluders stay clickable: %s", error.c_str());
-        return;
+    static bool hooked = false;
+    if (hooked) {
+        return true;
     }
     // cmp byte [rdi+0x1E4], 0: one whole instruction, nothing position-dependent.
     static constexpr uint8_t kPitchEntry[] = { 0x80, 0xBF, 0xE4, 0x01, 0x00, 0x00, 0x00 };
-    if (!mem::HookEntry(addresses.camera_pitch, kPitchEntry, sizeof kPitchEntry,
-            reinterpret_cast<const void*>(&CameraPitchHook), reinterpret_cast<void**>(&g_camera_pitch))) {
+    hooked = mem::HookEntry(camera_pitch, kPitchEntry, sizeof kPitchEntry,
+        reinterpret_cast<const void*>(&CameraPitchHook), reinterpret_cast<void**>(&g_camera_pitch));
+    return hooked;
+}
+
+void InstallCameraOccluders(const mem::MainExecutable& exe, const OccluderAddresses& addresses)
+{
+    auto file_address = [&](uintptr_t address) { return static_cast<unsigned long>(address - exe.load_bias); };
+    if (!HookCameraPitch(addresses.camera_pitch)) {
         LOG_WARN("Camera occluders stay clickable: could not hook GetCameraPitchDegrees");
         return;
     }
@@ -474,6 +513,96 @@ void InstallCameraOccluders(const mem::MainExecutable& exe)
     LOG_INFO("Camera occluders: GetCameraPitchDegrees %#lx, picking ray %#lx, %s",
         file_address(addresses.camera_pitch), file_address(addresses.raycast_site),
         GetState().prevent_clicking_camera_occluders ? "on" : "off in the config");
+}
+
+// Camera tweaks ported from Native Camera Tweaks by ersh1 (camera_tweaks.cpp): the camera update's
+// pitch comes from CameraPitchHook, and the game's camera definitions are found through the same
+// code.
+void InstallCameraTweaks(const mem::MainExecutable& exe, const CameraTweakAddresses& addresses)
+{
+    auto file_address = [&](uintptr_t address) { return static_cast<unsigned long>(address - exe.load_bias); };
+    bool pointer_in_data = false;
+    for (int i = 0; i < exe.data_count; ++i) {
+        pointer_in_data |= exe.data[i].Contains(addresses.settings_pointer);
+    }
+    if (!pointer_in_data) {
+        LOG_WARN("Camera tweaks off: the camera settings pointer is not inside the game's data segments");
+        return;
+    }
+    camera_tweaks::GameLayout layout;
+    layout.settings = reinterpret_cast<uint8_t* const*>(addresses.settings_pointer);
+    layout.override_flag = addresses.override_flag;
+    layout.exploration = addresses.exploration;
+    layout.combat = addresses.combat;
+    layout.override_definition = addresses.override_definition;
+    camera_tweaks::SetGameLayout(layout);
+    if (!HookCameraPitch(addresses.camera_pitch)) {
+        LOG_WARN("Camera tweaks off: could not hook GetCameraPitchDegrees");
+        return;
+    }
+    g_pitch_update_return = addresses.pitch_return;
+    LOG_INFO("Camera tweaks: settings %#lx (definitions +%#x, +%#x, +%#x), pitch update %#lx",
+        file_address(addresses.settings_pointer), addresses.exploration, addresses.combat,
+        addresses.override_definition, file_address(addresses.pitch_return - 5));
+}
+
+// Zoom and keyboard rotation speed (camera tweaks): the stores where ExecuteCameraCommand writes the
+// speed into the camera become calls of wasd_ZoomSpeedStub and wasd_RotationSpeedStub. The game
+// picks the camera, so the speed lands in the right one.
+void InstallCameraSpeedStores(const mem::MainExecutable& exe, const CameraSpeedStores& stores)
+{
+    auto file_address = [&](uintptr_t address) { return static_cast<unsigned long>(address - exe.load_bias); };
+    // `call stub ; nop4` replaces the 9-byte movss. This runs before the game starts, so no thread
+    // can be inside these bytes.
+    auto patch = [](uintptr_t site, void (*target)()) {
+        void* stub = mem::MakeJumpStub(site, reinterpret_cast<const void*>(target));
+        if (!stub) {
+            return false;
+        }
+        uint8_t code[9] = { 0xE8, 0, 0, 0, 0, 0x0F, 0x1F, 0x40, 0x00 };
+        const int32_t rel = static_cast<int32_t>(reinterpret_cast<intptr_t>(stub) - static_cast<intptr_t>(site + 5));
+        std::memcpy(code + 1, &rel, sizeof rel);
+        return mem::WriteCode(site, code, sizeof code);
+    };
+    if (!patch(stores.zoom, &wasd_ZoomSpeedStub) || !patch(stores.rotation, &wasd_RotationSpeedStub)) {
+        LOG_WARN("Camera tweaks: the game's zoom and rotation speeds stay, could not patch the speed stores");
+        return;
+    }
+    LOG_INFO("Camera tweaks: zoom speed store %#lx, rotation speed store %#lx", file_address(stores.zoom),
+        file_address(stores.rotation));
+}
+
+// The occluders and the camera tweaks both hook the entry of GetCameraPitchDegrees, and the
+// signatures of both check that entry, so both searches run on the unpatched code first.
+void InstallCameraFeatures(const mem::MainExecutable& exe, uintptr_t execute_camera_command)
+{
+    const auto* code = reinterpret_cast<const uint8_t*>(exe.code.start);
+    OccluderAddresses occluders;
+    CameraTweakAddresses tweaks;
+    std::string occluder_error, tweak_error;
+    const bool occluders_found =
+        FindOccluderAddresses(code, exe.code.size, exe.code.start, occluders, occluder_error);
+    const bool tweaks_found = FindCameraTweakAddresses(code, exe.code.size, exe.code.start, tweaks, tweak_error);
+    if (occluders_found) {
+        InstallCameraOccluders(exe, occluders);
+    } else {
+        LOG_WARN("Camera occluders stay clickable: %s", occluder_error.c_str());
+    }
+    if (tweaks_found) {
+        InstallCameraTweaks(exe, tweaks);
+    } else {
+        LOG_WARN("Camera tweaks off: %s", tweak_error.c_str());
+    }
+    if (!execute_camera_command) {
+        return;
+    }
+    CameraSpeedStores stores;
+    std::string error;
+    if (!FindCameraSpeedStores(code, exe.code.size, exe.code.start, execute_camera_command, stores, error)) {
+        LOG_WARN("Camera tweaks: the game's zoom and rotation speeds stay, %s", error.c_str());
+        return;
+    }
+    InstallCameraSpeedStores(exe, stores);
 }
 
 // Runs in every process that inherits LD_PRELOAD (Steam's launch wrappers, the crash handler, ...),
@@ -616,5 +745,37 @@ wasd_RaycastSiteStub:
     movq %r11, %rsi
     jmpq *0x48(%rax)
     .size wasd_RaycastSiteStub, .-wasd_RaycastSiteStub
+    .popsection
+)");
+
+// Replace `movss [r8+0xA4], xmm0` (zoom speed) and `movss [r8+0x9C], xmm1` (keyboard rotation speed)
+// in ExecuteCameraCommand, entered with `call`: store the value times the multiplier. The register
+// and the flags are left as they were; the register is kept below the return address meanwhile
+// (the red zone of this leaf code).
+asm(R"(
+    .pushsection .text
+    .p2align 4
+    .globl wasd_ZoomSpeedStub
+    .hidden wasd_ZoomSpeedStub
+    .type wasd_ZoomSpeedStub, @function
+wasd_ZoomSpeedStub:
+    movups %xmm0, -24(%rsp)
+    mulss wasd_zoom_speed_mult(%rip), %xmm0
+    movss %xmm0, 0xa4(%r8)
+    movups -24(%rsp), %xmm0
+    ret
+    .size wasd_ZoomSpeedStub, .-wasd_ZoomSpeedStub
+
+    .p2align 4
+    .globl wasd_RotationSpeedStub
+    .hidden wasd_RotationSpeedStub
+    .type wasd_RotationSpeedStub, @function
+wasd_RotationSpeedStub:
+    movups %xmm1, -24(%rsp)
+    mulss wasd_rotation_speed_mult(%rip), %xmm1
+    movss %xmm1, 0x9c(%r8)
+    movups -24(%rsp), %xmm1
+    ret
+    .size wasd_RotationSpeedStub, .-wasd_RotationSpeedStub
     .popsection
 )");

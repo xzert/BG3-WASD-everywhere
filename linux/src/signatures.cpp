@@ -282,6 +282,48 @@ bool FindOccluderAddresses(const uint8_t* text, size_t size, uintptr_t text_addr
     return true;
 }
 
+bool FindCameraTweakAddresses(const uint8_t* text, size_t size, uintptr_t text_address, CameraTweakAddresses& out,
+    std::string& error)
+{
+    const auto site = FindPattern(text, size,
+        "48 8B 1D ?? ?? ?? ?? 80 BB ?? ?? 00 00 00 0F 85 ?? ?? ?? ?? F6 85 A8 00 00 00 01 0F 85 ?? ?? ?? ?? 48 81 C3 "
+        "?? ?? ?? ?? 48 89 EF 31 F6 E8 ?? ?? ?? ?? 80 BD 4C 01 00 00 00");
+    if (site.size() != 1) {
+        error = "the camera pitch update matched " + std::to_string(site.size()) + " times, expected 1";
+        return false;
+    }
+    const size_t s = site[0];
+    // GetCameraPitchDegrees starts with `cmp byte [rdi+0x1E4], 0`.
+    static constexpr uint8_t kPitchEntry[] = { 0x80, 0xBF, 0xE4, 0x01, 0x00, 0x00, 0x00 };
+    const int64_t pitch = RelTarget(text, s + 46, s + 50);
+    if (pitch < 0 || static_cast<size_t>(pitch) + sizeof kPitchEntry > size ||
+        std::memcmp(text + pitch, kPitchEntry, sizeof kPitchEntry) != 0) {
+        error = "the camera pitch update doesn't call GetCameraPitchDegrees";
+        return false;
+    }
+    // Both jne land on `add rbx, offset ; jmp back` to the `mov rdi, rbp`.
+    auto branch_offset = [&](size_t jne_field, size_t jne_end, uint32_t& offset) {
+        const int64_t target = RelTarget(text, jne_field, jne_end);
+        if (target < 0 || static_cast<size_t>(target) + 12 > size || text[target] != 0x48 || text[target + 1] != 0x81 ||
+            text[target + 2] != 0xC3 || text[target + 7] != 0xE9 ||
+            RelTarget(text, target + 8, target + 12) != static_cast<int64_t>(s + 40)) {
+            return false;
+        }
+        offset = ReadRel32(text + target + 3);
+        return true;
+    };
+    if (!branch_offset(s + 16, s + 20, out.override_definition) || !branch_offset(s + 29, s + 33, out.combat)) {
+        error = "the camera definition branches of the pitch update don't match";
+        return false;
+    }
+    out.settings_pointer = text_address + RelTarget(text, s + 3, s + 7);
+    out.override_flag = ReadRel32(text + s + 9);
+    out.exploration = ReadRel32(text + s + 36);
+    out.camera_pitch = text_address + pitch;
+    out.pitch_return = text_address + s + 50;
+    return true;
+}
+
 bool FindCharacterCameraAddresses(const uint8_t* text, size_t size, uintptr_t text_address,
     uintptr_t is_in_controller_mode, CharacterCameraAddresses& out, std::string& error)
 {
@@ -372,6 +414,33 @@ bool FindTelemetryCalls(const uint8_t* text, size_t text_size, uintptr_t text_ad
             return false;
         }
     }
+    return true;
+}
+
+bool FindCameraSpeedStores(const uint8_t* text, size_t size, uintptr_t text_address,
+    uintptr_t execute_camera_command, CameraSpeedStores& out, std::string& error)
+{
+    // Searched only inside ExecuteCameraCommand (about 0x1100 bytes). Both directions of a command
+    // end at the same store: the speed, then `mulss` by the input, then the store.
+    constexpr size_t kWindow = 0x1800;
+    const size_t start = execute_camera_command - text_address;
+    if (execute_camera_command < text_address || start >= size) {
+        error = "ExecuteCameraCommand is outside the code";
+        return false;
+    }
+    const size_t window = std::min(kWindow, size - start);
+    // mulss xmm0, xmm1 ; movss [r8+0xA4], xmm0 ; jmp
+    const auto zoom = FindPattern(text + start, window, "F3 0F 59 C1 F3 41 0F 11 80 A4 00 00 00 E9");
+    // mulss xmm1, xmm0 ; movss [r8+0x9C], xmm1 ; mov byte [r8+0x1F1], 1 ; jmp
+    const auto rotation =
+        FindPattern(text + start, window, "F3 0F 59 C8 F3 41 0F 11 88 9C 00 00 00 41 C6 80 F1 01 00 00 01 E9");
+    if (zoom.size() != 1 || rotation.size() != 1) {
+        error = "the zoom speed store matched " + std::to_string(zoom.size()) + " times, the rotation speed store " +
+            std::to_string(rotation.size()) + ", expected 1 each";
+        return false;
+    }
+    out.zoom = execute_camera_command + zoom[0] + 4;
+    out.rotation = execute_camera_command + rotation[0] + 4;
     return true;
 }
 

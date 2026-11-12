@@ -106,4 +106,32 @@ struct OccluderAddresses {
 bool FindOccluderAddresses(const uint8_t* text, size_t size, uintptr_t text_address, OccluderAddresses& out,
     std::string& error);
 
+// Camera tweaks (Native Camera Tweaks). The camera update has UpdateCameraPitch inlined; it asks
+// GetCameraPitchDegrees for the pitch the camera turns to, with the current camera definition in rbx:
+// `mov rbx, [settings] ; cmp byte [rbx+flag], 0 ; jne override ; test byte [rbp+0xA8], 1 ;
+// jne combat ; add rbx, exploration ; mov rdi, rbp ; xor esi, esi ; call GetCameraPitchDegrees`.
+// Windows: GetCurrentCameraDefinition, with the offsets 0x28 lower.
+struct CameraTweakAddresses {
+    uintptr_t settings_pointer = 0;  // the global pointer to eoc::CameraSettings
+    uint32_t override_flag = 0;
+    uint32_t exploration = 0;
+    uint32_t combat = 0;
+    uint32_t override_definition = 0;
+    uintptr_t camera_pitch = 0;  // GetCameraPitchDegrees, as in OccluderAddresses
+    uintptr_t pitch_return = 0;  // the return address of that call
+};
+
+bool FindCameraTweakAddresses(const uint8_t* text, size_t size, uintptr_t text_address, CameraTweakAddresses& out,
+    std::string& error);
+
+// Inside ExecuteCameraCommand, where the zoom and keyboard rotation commands write their speed into
+// the camera: `movss [r8+0xA4], xmm0` and `movss [r8+0x9C], xmm1`, 9 bytes each.
+struct CameraSpeedStores {
+    uintptr_t zoom = 0;
+    uintptr_t rotation = 0;
+};
+
+bool FindCameraSpeedStores(const uint8_t* text, size_t size, uintptr_t text_address,
+    uintptr_t execute_camera_command, CameraSpeedStores& out, std::string& error);
+
 }  // namespace wasd

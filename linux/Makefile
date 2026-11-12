@@ -15,7 +15,7 @@ SO_LDFLAGS := -shared -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL -W
 	-Wl,--version-script=exports.map
 LDLIBS := -ldl -pthread
 
-SRC := main.cpp camera.cpp hotkeys.cpp input.cpp inputconfig.cpp log.cpp memory.cpp settings.cpp \
+SRC := main.cpp camera.cpp camera_tweaks.cpp hotkeys.cpp input.cpp inputconfig.cpp log.cpp memory.cpp settings.cpp \
 	settings_file.cpp signatures.cpp
 OBJ := $(SRC:%.cpp=$(BUILD)/%.o)
 HEADERS := $(wildcard src/*.hpp) src/keymap.inc

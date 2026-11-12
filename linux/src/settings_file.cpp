@@ -1,5 +1,6 @@
 #include "settings.hpp"
 
+#include <cstring>
 #include <fstream>
 
 // Reading bg3-wasd-everywhere.toml, without the platform: shared by the Linux and macOS ports.
@@ -77,6 +78,68 @@ bool ParseNumber(const std::string& text, float& number)
     return any;
 }
 
+// Keys of one camera kind, e.g. "ExplorationZoomMin"; `prefix` is "Exploration" or "Combat".
+template <typename Add>
+void AddModeKeys(const char* prefix, CameraModeTweaks& m, Add add)
+{
+    add(prefix, "UnlockPitch", nullptr, &m.unlock_pitch);
+    add(prefix, "KeepTacticalPitchLocked", nullptr, &m.keep_tactical_pitch_locked);
+    add(prefix, "UnlockedPitchMin", &m.unlocked_pitch_min, nullptr);
+    add(prefix, "UnlockedPitchMax", &m.unlocked_pitch_max, nullptr);
+    add(prefix, "OverrideLockedPitch", nullptr, &m.override_locked_pitch);
+    add(prefix, "LockedPitchClose", &m.locked_pitch_close, nullptr);
+    add(prefix, "LockedPitchFar", &m.locked_pitch_far, nullptr);
+    add(prefix, "LockedTacticalPitchClose", &m.locked_tactical_pitch_close, nullptr);
+    add(prefix, "LockedTacticalPitchFar", &m.locked_tactical_pitch_far, nullptr);
+    add(prefix, "LockedAltPitchClose", &m.locked_alt_pitch_close, nullptr);
+    add(prefix, "LockedAltPitchFar", &m.locked_alt_pitch_far, nullptr);
+    add(prefix, "OverrideZoom", nullptr, &m.override_zoom);
+    add(prefix, "ZoomMin", &m.zoom_min, nullptr);
+    add(prefix, "ZoomMax", &m.zoom_max, nullptr);
+    add(prefix, "TacticalZoomMin", &m.tactical_zoom_min, nullptr);
+    add(prefix, "TacticalZoomMax", &m.tactical_zoom_max, nullptr);
+    add(prefix, "AltZoomMin", &m.alt_zoom_min, nullptr);
+    add(prefix, "AltZoomMax", &m.alt_zoom_max, nullptr);
+    add(prefix, "OverrideFOV", nullptr, &m.override_fov);
+    add(prefix, "FOVClose", &m.fov_close, nullptr);
+    add(prefix, "FOVFar", &m.fov_far, nullptr);
+    add(prefix, "TacticalFOV", &m.tactical_fov, nullptr);
+    add(prefix, "AltFOVClose", &m.alt_fov_close, nullptr);
+    add(prefix, "AltFOVFar", &m.alt_fov_far, nullptr);
+    add(prefix, "OverrideOffset", nullptr, &m.override_offset);
+    add(prefix, "HorizontalOffsetMult", &m.horizontal_offset_mult, nullptr);
+    add(prefix, "VerticalOffsetMult", &m.vertical_offset_mult, nullptr);
+}
+
+// Sets a camera tweak; false if `key` isn't one. The keys are those of Native Camera Tweaks.
+bool ParseCameraTweak(const std::string& key, const std::string& value, CameraTweakSettings& t)
+{
+    bool found = false;
+    auto add = [&](const char* prefix, const char* name, float* number, bool* flag) {
+        const size_t n = std::strlen(prefix);
+        if (found || key.compare(0, n, prefix) != 0 || key.compare(n, std::string::npos, name) != 0) {
+            return;
+        }
+        found = true;
+        if (number) {
+            ParseNumber(value, *number);
+        } else {
+            *flag = ParseBool(value, *flag);
+        }
+    };
+    add("", "CameraTweaks", nullptr, &t.enabled);
+    add("", "UnlockedPitchInitialValue", &t.unlocked_pitch_initial_value, nullptr);
+    add("", "UnlockedPitchClampSpeed", &t.unlocked_pitch_clamp_speed, nullptr);
+    add("", "MouseCameraRotationMult", &t.mouse_camera_rotation_mult, nullptr);
+    add("", "MousePitchMult", &t.mouse_pitch_mult, nullptr);
+    add("", "MouseZoomMult", &t.mouse_zoom_mult, nullptr);
+    add("", "InvertMousePitch", nullptr, &t.invert_mouse_pitch);
+    add("", "KeyboardCameraRotationMult", &t.keyboard_camera_rotation_mult, nullptr);
+    AddModeKeys("Exploration", t.exploration, add);
+    AddModeKeys("Combat", t.combat, add);
+    return found;
+}
+
 }  // namespace
 
 bool ParseSettingsFile(const std::string& path, Settings& s)
@@ -137,6 +200,8 @@ bool ParseSettingsFile(const std::string& path, Settings& s)
             s.prevent_clicking_active_character = ParseBool(value, s.prevent_clicking_active_character);
         } else if (key == "RotatePlusLeftclickMovesForward") {
             s.rotate_plus_lmb_is_forward = ParseBool(value, s.rotate_plus_lmb_is_forward);
+        } else {
+            ParseCameraTweak(key, value, s.camera_tweaks);
         }
     }
     return true;

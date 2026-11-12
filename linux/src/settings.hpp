@@ -4,6 +4,47 @@
 
 namespace wasd {
 
+// Camera tweaks for one camera kind, the exploration camera or the combat camera. The names and
+// defaults follow Native Camera Tweaks by ersh1, except where noted.
+struct CameraModeTweaks {
+    bool unlock_pitch = true;
+    bool keep_tactical_pitch_locked = false;
+    // Native Camera Tweaks allows -85 and keeps the camera above the floor; that floor check isn't
+    // ported, so a lower limit can take the camera under the ground.
+    float unlocked_pitch_min = 0.0f;
+    float unlocked_pitch_max = 85.0f;
+
+    bool override_locked_pitch = false;
+    float locked_pitch_close = 0.0f, locked_pitch_far = 0.0f;
+    float locked_tactical_pitch_close = 85.55f, locked_tactical_pitch_far = 85.55f;
+    float locked_alt_pitch_close = 32.69f, locked_alt_pitch_far = 39.7f;
+
+    bool override_zoom = true;
+    float zoom_min = 0.5f, zoom_max = 20.0f;
+    float tactical_zoom_min = 10.0f, tactical_zoom_max = 50.0f;
+    float alt_zoom_min = 10.0f, alt_zoom_max = 40.0f;
+
+    bool override_fov = false;
+    float fov_close = 55.0f, fov_far = 55.0f, tactical_fov = 25.0f;
+    float alt_fov_close = 45.0f, alt_fov_far = 45.0f;
+
+    bool override_offset = false;
+    float horizontal_offset_mult = 0.0f, vertical_offset_mult = 0.8f;
+};
+
+struct CameraTweakSettings {
+    bool enabled = true;
+    float unlocked_pitch_initial_value = 25.0f;
+    float unlocked_pitch_clamp_speed = 5.0f;
+    CameraModeTweaks exploration{ .locked_pitch_close = 19.05f, .locked_pitch_far = 40.71f };
+    CameraModeTweaks combat{ .locked_pitch_close = 32.73f, .locked_pitch_far = 52.42f };
+    float mouse_camera_rotation_mult = 1.0f;
+    float mouse_pitch_mult = 0.25f;
+    float mouse_zoom_mult = 0.5f;
+    bool invert_mouse_pitch = false;
+    float keyboard_camera_rotation_mult = 2.0f;
+};
+
 // The settings in bg3-wasd-everywhere.toml. Defaults match the Windows mod.
 struct Settings {
     std::string toggle_movement_mode = "key:capslock";
@@ -27,6 +68,7 @@ struct Settings {
     // macOS only so far.
     bool prevent_clicking_active_character = true;
     bool prevent_clicking_camera_occluders = false;
+    CameraTweakSettings camera_tweaks;
 };
 
 // Reads `path`; keys that are missing keep their defaults. Returns false if the file can't be read.

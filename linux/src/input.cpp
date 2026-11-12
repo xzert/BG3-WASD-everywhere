@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "camera.hpp"
+#include "camera_tweaks.hpp"
 #include "hotkeys.hpp"
 #include "log.hpp"
 #include "state.hpp"
@@ -22,6 +23,8 @@ constexpr uint32_t kKeyDown = 0x300;
 constexpr uint32_t kKeyUp = 0x301;
 constexpr uint32_t kMouseButtonDown = 0x401;
 constexpr uint32_t kMouseButtonUp = 0x402;
+constexpr uint32_t kMouseMotion = 0x400;
+constexpr size_t kMouseMotionYrelOffset = 32;
 constexpr size_t kKeyRepeatOffset = 13;
 constexpr size_t kKeyScancodeOffset = 16;
 constexpr size_t kMouseButtonOffset = 16;
@@ -117,6 +120,13 @@ void OnSdlEvent(const void* event)
         // Releases still count, so a held key can't get stuck.
         if (!down || !TextInputActive()) {
             OnKey(key, down);
+        }
+    } else if (type == kMouseMotion) {
+        // The free camera pitch follows the vertical mouse movement while the camera rotates.
+        int32_t yrel;
+        std::memcpy(&yrel, raw + kMouseMotionYrelOffset, sizeof yrel);
+        if (yrel) {
+            camera_tweaks::OnMouseMotion(yrel);
         }
     } else if (type == kMouseButtonDown || type == kMouseButtonUp) {
         const uint8_t button = raw[kMouseButtonOffset];

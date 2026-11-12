@@ -122,6 +122,13 @@ int main(int argc, char** argv)
         ++failures;
     } else {
         std::printf("ExecuteCameraCommand %#lx\n", Hex(camera));
+        wasd::CameraSpeedStores stores;
+        if (!wasd::FindCameraSpeedStores(text.data, text.size, text.address, camera, stores, error)) {
+            std::printf("FAILED (camera tweak speeds): %s\n", error.c_str());
+            ++failures;
+        } else {
+            std::printf("Camera speed stores  zoom %#lx, rotation %#lx\n", Hex(stores.zoom), Hex(stores.rotation));
+        }
         wasd::RotationAddresses rotation;
         if (!wasd::FindRotationAddresses(text.data, text.size, text.address, camera, rotation, error)) {
             std::printf("FAILED (camera rotation): %s\n", error.c_str());
@@ -169,6 +176,20 @@ int main(int argc, char** argv)
     } else {
         std::printf("GetCameraPitchDegrees %#lx, picking ray %#lx\n", Hex(occluders.camera_pitch),
             Hex(occluders.raycast_site));
+    }
+
+    wasd::CameraTweakAddresses tweaks;
+    if (!wasd::FindCameraTweakAddresses(text.data, text.size, text.address, tweaks, error)) {
+        std::printf("FAILED (camera tweaks): %s\n", error.c_str());
+        ++failures;
+    } else if (tweaks.camera_pitch != occluders.camera_pitch) {
+        std::printf("FAILED (camera tweaks): the pitch update calls %#lx, not GetCameraPitchDegrees\n",
+            Hex(tweaks.camera_pitch));
+        ++failures;
+    } else {
+        std::printf("Camera settings      %#lx, flag +%#x, definitions +%#x +%#x +%#x, pitch update returns to %#lx\n",
+            Hex(tweaks.settings_pointer), tweaks.override_flag, tweaks.exploration, tweaks.combat,
+            tweaks.override_definition, Hex(tweaks.pitch_return));
     }
 
     wasd::TelemetryCalls telemetry;
