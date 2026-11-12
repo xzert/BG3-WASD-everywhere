@@ -5,7 +5,7 @@ Direct character movement with WASD for the native Linux build of Baldur's Gate 
 Proton, use the original Windows mod instead.
 
 Supported game version: **4.1.1.7631656** (Hotfix #36). On any other version, the mod writes an
-error to its log and does nothing. Not tested on Steam Deck yet.
+error to its log and does nothing.
 
 ## Install
 

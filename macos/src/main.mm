@@ -53,6 +53,7 @@
 
 #include "arm64.hpp"
 #include "camera_tweaks.hpp"
+#include "picking.hpp"
 #include "hotkeys.hpp"
 #include "inputconfig.hpp"
 #include "keycodes.hpp"
@@ -122,8 +123,9 @@ std::atomic<bool> g_rotate_plus_left_click{ true };
 bool g_rotate_input_is_left_click = false;  // CameraToggleMouseRotate includes the left button
 std::atomic<bool> g_mode_toggles_mouselook{ false };  // TogglingMovementModeAlsoTogglesCameraRotation
 std::atomic<bool> g_prevent_clicking_character{ true };  // PreventClickingActiveCharacter
+std::atomic<float> g_max_click_distance{ 1.0f };          // MaxClickDistanceBehindCharacter, meters
 std::atomic<bool> g_prevent_clicking_occluders{ false };  // PreventClickingCameraOccluders
-std::atomic<const uint8_t*> g_camera_behavior{ nullptr };  // ecl::GameCameraBehavior, from CalcCamTargetDest
+std::atomic<const uint8_t*> g_camera_behavior{ nullptr };  // ecl::GameCameraBehavior, for the occluders
 using CameraPitchFn = float (*)(const uint8_t* camera, bool a, bool b);
 CameraPitchFn g_camera_pitch = nullptr;  // ecl::GameCameraBehavior::GetCameraPitchDegrees
 double g_mouse_dy_rest = 0.0;            // main thread: the fraction of a pixel not yet passed on
@@ -234,6 +236,7 @@ void LoadSettings(bool first)
     g_rotate_plus_left_click = settings.rotate_plus_lmb_is_forward;
     g_mode_toggles_mouselook = settings.toggling_movement_mode_also_toggles_camera_rotation;
     g_prevent_clicking_character = settings.prevent_clicking_active_character;
+    g_max_click_distance = settings.max_click_distance_behind_character;
     g_prevent_clicking_occluders = settings.prevent_clicking_camera_occluders;
     camera_tweaks::Configure(settings.camera_tweaks);
     if (first) {
@@ -1241,8 +1244,15 @@ void InstallMouselook(const uintptr_t* addresses)
 // character it now reports so when ecl::PickingHelper asks. Other callers (character highlights,
 // sound occlusion) get the game's answer. The active character comes from
 // gui::GameUI::OnSelectedCharacterChanged.
+//
+// A ray through the character comes down to the ground behind it; from a low camera, far behind, so a
+// click there sent the character running off. When that point is further from the character than
+// MaxClickDistanceBehindCharacter, the character stays clickable, as in vanilla. The ray comes from
+// the camera occluders' RaycastAll hook: GameObjectPick::ExecuteWTKernel casts it and then asks
+// IsFading about each hit, on the same thread.
 
 std::atomic<uint64_t> g_active_character{ 0 };  // its entity handle
+thread_local wasd::picking::Ray t_picking_ray{};  // GameObjectPick's latest ray on this thread
 struct CodeRange {
     uintptr_t start, end;
 };
@@ -1273,15 +1283,32 @@ uint64_t IsFadingHook(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64
     if (!character || a0 != character || !IsPickingCode(caller)) {
         return g_is_fading(a0, a1, a2, a3, a4, a5, a6, a7);
     }
+    bool skip = g_prevent_clicking_character && IsCharacterMode() && !IsControllerMode();
+    // How far behind the character the ray of GameObjectPick comes down to the ground.
+    const CodeRange& pick = g_picking_code[0];
+    const uint8_t* camera = g_camera_behavior.load(std::memory_order_relaxed);
+    const bool measured = skip && camera && t_picking_ray.valid && caller >= pick.start && caller < pick.end;
+    float behind = 0.0f, root[3] = {};
+    const float limit = g_max_click_distance.load(std::memory_order_relaxed);
+    if (measured) {
+        behind = wasd::picking::GroundDistanceBehind(camera, t_picking_ray, root);
+        skip = !(behind > limit);
+    }
+    const uint64_t result = skip ? 1 : g_is_fading(a0, a1, a2, a3, a4, a5, a6, a7);
+
     // What the picking code hears about the active character, logged when it changes.
     static std::atomic<int> last_state{ -1 };
-    const bool skip = g_prevent_clicking_character && IsCharacterMode() && !IsControllerMode();
-    const uint64_t result = skip ? 1 : g_is_fading(a0, a1, a2, a3, a4, a5, a6, a7);
-    const int state = (IsCharacterMode() ? 4 : 0) | (skip ? 2 : 0) | int(result & 1);
+    const int state = (IsCharacterMode() ? 8 : 0) | (measured ? 4 : 0) | (skip ? 2 : 0) | int(result & 1);
     if (last_state.exchange(state) != state) {
-        LOG_INFO("Picking asks about the active character in %s mode: %s",
-            IsCharacterMode() ? "Character" : "Camera",
-            skip ? "skipped by the mod" : (result & 1) ? "the game says it fades out" : "clickable");
+        if (measured) {
+            LOG_INFO("Active character %s: the ray reaches the ground %.1f m behind it, limit %.1f "
+                     "(camera %.1f m above the character)",
+                skip ? "skipped by picking" : "kept clickable", behind, limit, t_picking_ray.start[1] - root[1]);
+        } else {
+            LOG_INFO("Picking asks about the active character in %s mode: %s",
+                IsCharacterMode() ? "Character" : "Camera",
+                skip ? "skipped by the mod" : (result & 1) ? "the game says it fades out" : "clickable");
+        }
     }
     return result;
 }
@@ -1395,8 +1422,9 @@ void InstallCameraTweaks(const macho::Image& image, const uintptr_t* addresses, 
 // companions. The picking ray of ecl::PickingHelper::GameObjectPick then starts the camera's zoom
 // distance further along, unless the camera looks down steeply or from far away. Windows hooks the
 // vtable's 0x40 slot: MSVC has one destructor slot where the Itanium ABI has two, so here it is 0x48,
-// RaycastAll, not RaycastClosest. The camera
-// (ecl::GameCameraBehavior, the Windows mod's Camera struct) comes from CalcCamTargetDest.
+// RaycastAll, not RaycastClosest. The camera (ecl::GameCameraBehavior, the Windows mod's Camera
+// struct) comes from the camera tweaks' pitch update, the camera the player sees; without it, from
+// CalcCamTargetDest, which runs for other cameras too.
 void InstallOccluderHooks(const uintptr_t* addresses)
 {
     const uintptr_t target = addresses[symbols::CalcCamTargetDest];
@@ -1413,8 +1441,9 @@ void InstallOccluderHooks(const uintptr_t* addresses)
             slot = candidate;
         }
     }
-    if (!slot || !InlineHook("CalcCamTargetDest", target, reinterpret_cast<uintptr_t>(&CameraTargetProbe),
-                      &g_camera_target_original)) {
+    if (!slot || (!g_pitch_update_return && !InlineHook("CalcCamTargetDest", target,
+                                                reinterpret_cast<uintptr_t>(&CameraTargetProbe),
+                                                &g_camera_target_original))) {
         LOG_WARN("Camera occluders stay clickable: RaycastAll isn't in the PhysXScene vtable, or no camera hook");
         return;
     }
@@ -1422,7 +1451,8 @@ void InstallOccluderHooks(const uintptr_t* addresses)
     if (!WritePointer(slot, reinterpret_cast<uintptr_t>(&RaycastProbe))) {
         return;
     }
-    LOG_INFO("Camera occluders: PhysXScene::RaycastAll hooked (vtable slot %#lx), %s", (unsigned long)(slot - vtable),
+    LOG_INFO("Camera occluders: PhysXScene::RaycastAll hooked (vtable slot %#lx), camera from %s, %s",
+        (unsigned long)(slot - vtable), g_pitch_update_return ? "the pitch update" : "CalcCamTargetDest",
         g_prevent_clicking_occluders ? "on" : "off in the config");
 }
 
@@ -1775,8 +1805,9 @@ void Run()
     InstallRotationHooks(addresses);
     InstallMouselook(addresses);
     InstallUnclickableCharacter(image, addresses);
-    InstallOccluderHooks(addresses);
+    // The tweaks first: with the pitch update hooked, the occluders take their camera from it.
     InstallCameraTweaks(image, addresses, slide);
+    InstallOccluderHooks(addresses);
 
     if (SwizzleSendEvent()) {
         LOG_INFO("Hotkeys enabled (-[BG3Application sendEvent:])");
@@ -1830,8 +1861,14 @@ extern "C" void ObserveCameraTarget(void*, void* const* view)
 extern "C" const float* AdjustRayStart(const float* start, const float* end, uintptr_t caller)
 {
     const CodeRange& pick = g_picking_code[0];  // GameObjectPick::ExecuteWTKernel
-    if (caller < pick.start || caller >= pick.end || !g_prevent_clicking_occluders || !IsCharacterMode() ||
-        IsControllerMode()) {
+    if (caller < pick.start || caller >= pick.end) {
+        return start;
+    }
+    // For the active character's click distance (IsFadingHook), with the game's own start.
+    std::memcpy(t_picking_ray.start, start, sizeof t_picking_ray.start);
+    std::memcpy(t_picking_ray.end, end, sizeof t_picking_ray.end);
+    t_picking_ray.valid = true;
+    if (!g_prevent_clicking_occluders || !IsCharacterMode() || IsControllerMode()) {
         return start;
     }
     const uint8_t* camera = g_camera_behavior.load(std::memory_order_relaxed);
@@ -1869,6 +1906,15 @@ extern "C" const float* AdjustRayStart(const float* start, const float* end, uin
 // set while the player rotates it with the mouse.
 extern "C" float PitchUpdateHook(uint8_t* camera)
 {
+    // The camera the player sees: the occluders use it too.
+    float zoom = 0.0f, current_pitch = 0.0f;
+    if (camera) {
+        std::memcpy(&zoom, camera + 0x54, sizeof zoom);
+        std::memcpy(&current_pitch, camera + 0x164, sizeof current_pitch);
+        if (std::isfinite(zoom) && std::isfinite(current_pitch) && zoom > 0.01f) {
+            g_camera_behavior.store(camera, std::memory_order_relaxed);
+        }
+    }
     const float pitch = g_camera_pitch(camera, false, false);
     const bool rotating = camera && (camera[0xA9] & 0x01);
     return camera_tweaks::OnUpdatePitch(camera, pitch, rotating, IsControllerMode());

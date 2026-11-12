@@ -107,6 +107,13 @@ PreventClickingActiveCharacter = true
 # object or ground behind it. Vanilla is false.
 # [true, false]
 
+MaxClickDistanceBehindCharacter = 1.0
+# With PreventClickingActiveCharacter, how far behind the active character, in meters, a click
+# through them may land on the ground. With a low camera, the cursor passes through your character
+# and reaches the ground far behind, and a click there sends the character running off. Further than
+# this, your character stays under the cursor, as in vanilla. Objects behind your character count by
+# the ground under the cursor's line, not by their own distance. 1000 means no limit.
+
 
 # Camera tweaks, ported from Native Camera Tweaks by ersh1:
 # https://www.nexusmods.com/baldursgate3/mods/945

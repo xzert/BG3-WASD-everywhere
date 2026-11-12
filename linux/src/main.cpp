@@ -17,6 +17,7 @@
 #include "inputconfig.hpp"
 #include "log.hpp"
 #include "memory.hpp"
+#include "picking.hpp"
 #include "settings.hpp"
 #include "signatures.hpp"
 #include "state.hpp"
@@ -375,23 +376,56 @@ bool Install()
 // Unclickable active character, like PreventClickingActiveCharacterHook on Windows: in Character mode
 // the picking code hears that the active character fades out, so the cursor ignores it. Only the
 // picking code's calls of IsFading are redirected; character highlights and sound occlusion keep the
-// game's answer. Picking runs on worker threads: only atomics here.
+// game's answer. Picking runs on worker threads: only atomics and thread-locals here.
+//
+// A ray through the character comes down to the ground behind it; from a low camera, far behind, so a
+// click there sent the character running off. When that point is further from the character than
+// MaxClickDistanceBehindCharacter, the character stays clickable, as in vanilla. The ray comes from
+// the camera occluders' stub, which sees GameObjectPick's RaycastAll just before that function asks
+// IsFading about each hit, on the same thread.
 using IsFadingFn = bool (*)(uint64_t entity, const void* view, int flag);
 IsFadingFn g_is_fading = nullptr;
 RegisterPair (*g_selected_character_changed)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) = nullptr;
+uintptr_t g_picking_ray_site = 0;  // GameObjectPick's RaycastAll call (camera occluders)
+thread_local picking::Ray t_picking_ray{};
+
+// Whether GameObjectPick asks about the character right after its ray: not before the ray site, and
+// within the same function.
+bool AfterPickingRay(uintptr_t caller)
+{
+    return g_picking_ray_site && caller > g_picking_ray_site && caller - g_picking_ray_site < 0x1000;
+}
 
 bool PickingIsFadingHook(uint64_t entity, const void* view, int flag)
 {
     const State& state = GetState();
-    if (entity && entity == state.active_character.load(std::memory_order_relaxed) &&
-        state.prevent_clicking_active_character && state.IsCharacterMovementMode() && !state.IsInControllerMode()) {
-        static std::atomic<bool> logged{ false };
-        if (!logged.exchange(true)) {
-            LOG_INFO("Active character skipped by picking");
-        }
-        return true;
+    if (!entity || entity != state.active_character.load(std::memory_order_relaxed) ||
+        !state.prevent_clicking_active_character || !state.IsCharacterMovementMode() || state.IsInControllerMode()) {
+        return g_is_fading(entity, view, flag);
     }
-    return g_is_fading(entity, view, flag);
+    const auto caller = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+    const uint8_t* camera = state.camera.load(std::memory_order_relaxed);
+    float behind = 0.0f, root[3] = {};
+    const bool measured = camera && t_picking_ray.valid && AfterPickingRay(caller);
+    if (measured) {
+        behind = picking::GroundDistanceBehind(camera, t_picking_ray, root);
+    }
+    const float limit = state.max_click_distance_behind_character.load(std::memory_order_relaxed);
+    const bool skip = !measured || !(behind > limit);
+
+    // The decision, logged when it changes.
+    static std::atomic<int> last_state{ -1 };
+    const int decision = !measured ? 0 : skip ? 1 : 2;
+    if (last_state.exchange(decision) != decision) {
+        if (!measured) {
+            LOG_INFO("Active character skipped by picking (no picking ray to measure)");
+        } else {
+            LOG_INFO("Active character %s: the ray reaches the ground %.1f m behind it, limit %.1f "
+                     "(camera %.1f m above the character)",
+                skip ? "skipped by picking" : "kept clickable", behind, limit, t_picking_ray.start[1] - root[1]);
+        }
+    }
+    return skip ? true : g_is_fading(entity, view, flag);
 }
 
 // OnSelectedCharacterChanged(this, short player, const ecs::EntityRef* character, bool).
@@ -456,9 +490,11 @@ uintptr_t g_pitch_update_return = 0;
 float CameraPitchHook(const uint8_t* camera, bool a, bool b)
 {
     const auto caller = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
-    // It runs for more than one camera, and some may have a NaN or zero zoom and pitch. Like
-    // State::IsCameraValid on Windows, keep the last camera with sane values.
-    if (camera) {
+    // It runs for more than one camera, and the others may have a NaN or zero zoom and pitch. The
+    // camera update's call (camera tweaks) is the one the player sees. Without that call found,
+    // keep the last camera with sane values, like State::IsCameraValid on Windows.
+    const bool update = g_pitch_update_return && caller == g_pitch_update_return;
+    if (camera && (update || !g_pitch_update_return)) {
         float zoom, pitch;
         std::memcpy(&zoom, camera + 0x54, sizeof zoom);
         std::memcpy(&pitch, camera + 0x164, sizeof pitch);
@@ -467,7 +503,7 @@ float CameraPitchHook(const uint8_t* camera, bool a, bool b)
         }
     }
     const float pitch = g_camera_pitch(camera, a, b);
-    if (g_pitch_update_return && caller == g_pitch_update_return) {
+    if (update) {
         return camera_tweaks::OnUpdatePitch(const_cast<uint8_t*>(camera), pitch, camera::IsRotating(),
             GetState().IsInControllerMode());
     }
@@ -510,6 +546,7 @@ void InstallCameraOccluders(const mem::MainExecutable& exe, const OccluderAddres
         LOG_WARN("Camera occluders stay clickable: could not patch the picking ray");
         return;
     }
+    g_picking_ray_site = addresses.raycast_site;
     LOG_INFO("Camera occluders: GetCameraPitchDegrees %#lx, picking ray %#lx, %s",
         file_address(addresses.camera_pitch), file_address(addresses.raycast_site),
         GetState().prevent_clicking_camera_occluders ? "on" : "off in the config");
@@ -678,6 +715,10 @@ extern "C" __attribute__((visibility("hidden"), used, noinline, noipa)) const fl
     const float* start, const float* end)
 {
     using namespace wasd;
+    // For the active character's click distance (PickingIsFadingHook), with the game's own start.
+    std::memcpy(t_picking_ray.start, start, sizeof t_picking_ray.start);
+    std::memcpy(t_picking_ray.end, end, sizeof t_picking_ray.end);
+    t_picking_ray.valid = true;
     const State& state = GetState();
     if (!state.prevent_clicking_camera_occluders || !state.IsCharacterMovementMode() || state.IsInControllerMode()) {
         return start;

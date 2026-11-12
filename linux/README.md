@@ -67,6 +67,11 @@ an error and stays inactive.
   character. Character highlights and sound occlusion call it too and keep the game's answer. The
   active character comes from `gui::GameUI::OnSelectedCharacterChanged`. Both names come from the
   macOS build, which keeps them.
+  - `MaxClickDistanceBehindCharacter` (1 m by default) limits it: when the cursor's ray reaches the
+    ground further behind the character, the character stays clickable, as in vanilla. Otherwise a
+    low camera sent the character running off to a point far behind them. The ray comes from the
+    camera occluders' stub, which sees `GameObjectPick`'s ray just before that function asks
+    `IsFading`; the ground is the plane of the camera's root position.
 - `PreventClickingCameraOccluders` (off by default, as on Windows): in Character mode the picking
   ray of `ecl::PickingHelper::GameObjectPick` starts the camera's zoom distance further along, so
   what stands between the camera and the character can't be clicked. A steep or distant camera

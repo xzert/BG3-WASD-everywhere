@@ -57,12 +57,18 @@ An early port for the native macOS game on Apple Silicon. Supported game version
   Windows. The game's picking skips objects that `ls::IsFading` reports as fading out; the library
   makes it report so for the active character when `ecl::PickingHelper` asks, and only then. The
   active character comes from `gui::GameUI::OnSelectedCharacterChanged`.
+  - `MaxClickDistanceBehindCharacter` (1 m by default) limits it: when the cursor's ray reaches the
+    ground further behind the character, the character stays clickable, as in vanilla. Otherwise a
+    low camera sent the character running off to a point far behind them. The ray comes from the
+    `RaycastAll` hook of the camera occluders, which `GameObjectPick` calls just before it asks
+    `IsFading`; the ground is the plane of the camera's root position.
 - `PreventClickingCameraOccluders` (off by default, as on Windows): in Character mode the picking ray
   of `ecl::PickingHelper::GameObjectPick` starts the camera's zoom distance further along, so what
   stands between the camera and the character can't be clicked. As on Windows, a steep or distant
   camera (zoom × pitch ≥ 300) is an exception. The library replaces `phx::PhysXScene::RaycastAll`
-  in its vtable and changes only rays cast from `GameObjectPick`; the camera
-  (`ecl::GameCameraBehavior`) comes from `ecl::CameraSystem::CalcCamTargetDest`.
+  in its vtable and changes only rays cast from `GameObjectPick`. The camera
+  (`ecl::GameCameraBehavior`) is the one the camera tweaks' pitch update sees, the one the player
+  looks through; without that hook, it comes from `ecl::CameraSystem::CalcCamTargetDest`.
 - Camera tweaks (`CameraTweaks`, on by default), the same as on Linux and with the same core
   (`../linux/src/camera_tweaks.cpp`), ported from
   [Native Camera Tweaks](https://github.com/ersh1/BG3_NativeCameraTweaks) by ersh1: the free pitch

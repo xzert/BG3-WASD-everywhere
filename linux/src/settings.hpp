@@ -67,6 +67,7 @@ struct Settings {
     bool rotate_plus_lmb_is_forward = true;
     // macOS only so far.
     bool prevent_clicking_active_character = true;
+    float max_click_distance_behind_character = 1.0f;  // meters
     bool prevent_clicking_camera_occluders = false;
     CameraTweakSettings camera_tweaks;
 };

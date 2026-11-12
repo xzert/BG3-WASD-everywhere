@@ -49,7 +49,7 @@ players use together with BG3WASD: a free camera pitch, wider zoom limits, FOV a
 |---|---|
 | Windows | The original mod from [Nexus Mods](https://www.nexusmods.com/baldursgate3/mods/781) |
 | Linux, game running through Proton (`bin/bg3.exe`) | The original mod with Native Mod Loader. Launch options: `WINEDLLOVERRIDES="bink2w64=n,b" %command%` |
-| Linux or Steam Deck, native game (`bin/bg3`, no `.exe`) | The Linux port from this repository |
+| Linux, native game (`bin/bg3`, no `.exe`) | The Linux port from this repository |
 | macOS on Apple Silicon | The early macOS port from this repository; build it yourself, see [Install on macOS](#install-on-macos) |
 
 To find out which build you have, look in `Baldurs Gate 3/bin`. A `bg3` file without an extension
@@ -62,8 +62,7 @@ The Windows version is the original mod. The Linux and macOS versions are separa
 
 Both ports support game version **4.1.1.7631656** (Hotfix #36).
 - The Linux port finds the game's code by byte signatures. On any other version it finds nothing,
-  writes an error to its log and stays inactive; the game itself is not affected. It has not been
-  tested on Steam Deck yet.
+  writes an error to its log and stays inactive; the game itself is not affected.
 - The macOS port finds the game's functions by their names, which the macOS build keeps.
 
 | Feature | Windows | Linux | macOS |
@@ -97,7 +96,9 @@ Notes on the Linux column:
   middle of a fight, the mod notices only at the next start or end, so press `ToggleMovementMode`
   yourself.
 - ⁵ The active character (`PreventClickingActiveCharacter`) and camera occluders
-  (`PreventClickingCameraOccluders`).
+  (`PreventClickingCameraOccluders`). A click through the active character lands on the ground at
+  most `MaxClickDistanceBehindCharacter` (1 m) behind them; further, the character stays under the
+  cursor, as in vanilla, so a low camera doesn't send them running off.
 - ⁶ Built in and on by default (`CameraTweaks`), with the same config keys as Native Camera Tweaks.
   Not ported yet: the gamepad settings, keeping the camera above the floor and keeping the zoom on a
   zone change. Without the floor check, the free pitch stops at 0 (looking straight ahead) by
@@ -174,6 +175,9 @@ including why Steam needs the launcher, are in [macos/README.md](macos/README.md
 1. Finish the Linux port: everything marked "—" in the Linux column above.
 2. Finish the macOS port: the rest of the table (Camera mode in combat, edge panning, turn-based
    mode) and a release build.
+3. Walk-back protection: a click on ground, stairs or a ledge between the camera and the character
+   should not send the character back toward the camera. A click through the character already
+   lands at most `MaxClickDistanceBehindCharacter` behind them.
 
 ## Building the Windows version
 

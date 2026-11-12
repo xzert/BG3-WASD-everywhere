@@ -106,6 +106,7 @@ void ReloadSettings()
     state.rotate_plus_lmb_is_forward = settings.rotate_plus_lmb_is_forward;
     state.mode_toggles_mouselook = settings.toggling_movement_mode_also_toggles_camera_rotation;
     state.prevent_clicking_active_character = settings.prevent_clicking_active_character;
+    state.max_click_distance_behind_character = settings.max_click_distance_behind_character;
     state.prevent_clicking_camera_occluders = settings.prevent_clicking_camera_occluders;
     camera_tweaks::Configure(settings.camera_tweaks);
     input::SetBindings(settings);
