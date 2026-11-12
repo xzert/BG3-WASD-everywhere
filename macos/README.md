@@ -63,6 +63,22 @@ An early port for the native macOS game on Apple Silicon. Supported game version
   camera (zoom × pitch ≥ 300) is an exception. The library replaces `phx::PhysXScene::RaycastAll`
   in its vtable and changes only rays cast from `GameObjectPick`; the camera
   (`ecl::GameCameraBehavior`) comes from `ecl::CameraSystem::CalcCamTargetDest`.
+- Camera tweaks (`CameraTweaks`, on by default), the same as on Linux and with the same core
+  (`../linux/src/camera_tweaks.cpp`), ported from
+  [Native Camera Tweaks](https://github.com/ersh1/BG3_NativeCameraTweaks) by ersh1: the free pitch
+  with the mouse while rotating, the zoom limits, locked pitch, FOV and offsets, and the zoom and
+  keyboard rotation speeds. Three 16-byte windows of game code become jumps to stubs in
+  `src/stubs.S`, which do the same instructions with the tweak and jump back:
+  - in `ecl::CameraSystem::UpdateGameCameraBehavior`, the call of
+    `ecl::GameCameraBehavior::GetCameraPitchDegrees` that gives the pitch the camera turns to
+    (the function itself starts with branches, so it can't take an inline hook). The
+    `eoc::CameraSettings` pointer and the camera definition offsets come from the code just before
+    that call;
+  - in `ecl::CameraSystem::OnInputEvent`, the two stores of the zoom and rotation speeds into the
+    camera.
+
+  Not ported, as on Linux: the gamepad settings, the floor check and keeping the zoom on a zone
+  change.
 - The movement keys are bound in `inputconfig_p1.json` of every player profile in
   `~/Documents/Larian Studios/Baldur's Gate 3/PlayerProfiles/`. It uses the same patcher as the Linux
   port, and keeps the original as `inputconfig_p1.json.bg3-wasd-everywhere.bak` before changing it.
@@ -155,12 +171,12 @@ The library's log is `~/Library/Logs/bg3-wasd-everywhere/bg3-wasd-everywhere.log
 - `src/keycodes.cpp`: macOS virtual key codes and modifier flags to the HID usage ids of the key
   names.
 - `bg3-wasd-everywhere.toml`: the default config.
-- `../linux/src/hotkeys.cpp`, `settings_file.cpp`: the key names, hotkey rules and config parser,
-  shared with the Linux port.
+- `../linux/src/hotkeys.cpp`, `settings_file.cpp`, `camera_tweaks.cpp`: the key names, hotkey
+  rules, config parser and camera tweaks, shared with the Linux port.
 - `src/launch.cpp`: the launcher for Steam's launch options.
 - `src/patterns.cpp`: finds the instructions to patch inside the game functions.
-- `src/stubs.S`: pass-through stubs. They keep every argument register, so a hook works whatever the
-  function's signature is.
+- `src/stubs.S`: pass-through stubs, which keep every argument register so a hook works whatever the
+  function's signature is, and the camera tweak stubs.
 - `src/macho.cpp`: the symbol table reader, for a loaded image or a file.
 - `src/arm64.cpp`: instruction decoding for patterns and inline hooks.
 - `src/symbols.hpp`: the game symbols the library uses.

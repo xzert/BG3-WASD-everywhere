@@ -113,6 +113,59 @@ _RaycastProbe:
     ldr x17, [x17, _g_raycast_original@PAGEOFF]
     br x17
 
+    // Camera tweaks. Each of the stubs below replaces 16 bytes of game code (patterns.hpp), does
+    // the same instructions with the tweak, and jumps back. x16 is free at these places (the game
+    // code there doesn't use it), and v16 is kept in the red zone below sp, which Darwin reserves.
+
+    // UpdateGameCameraBehavior: `mov x0, x26 ; mov w1, #0 ; bl GetCameraPitchDegrees ;
+    // ldr s1, [x26, #0x164]`. PitchUpdateHook calls GetCameraPitchDegrees and returns the pitch
+    // to use. It is a call where the game made one, so the registers it may change are those.
+    .p2align 2
+    .private_extern _PitchUpdateStub
+_PitchUpdateStub:
+    mov x0, x26
+    mov w1, #0
+    bl _PitchUpdateHook
+    ldr s1, [x26, #0x164]
+    adrp x16, _g_pitch_update_return@PAGE
+    ldr x16, [x16, _g_pitch_update_return@PAGEOFF]
+    br x16
+
+    // ecl::CameraSystem::OnInputEvent, zoom: `fmul s1, s1, s2 ; fmul s0, s1, s0 ;
+    // str s0, [x22, #0xA4] ; b next`. The speed stored is multiplied; s0 keeps the game's value.
+    .p2align 2
+    .private_extern _ZoomSpeedStub
+_ZoomSpeedStub:
+    fmul s1, s1, s2
+    fmul s0, s1, s0
+    stur q16, [sp, #-16]
+    adrp x16, _g_zoom_speed_mult@PAGE
+    ldr s16, [x16, _g_zoom_speed_mult@PAGEOFF]
+    fmul s16, s0, s16
+    str s16, [x22, #0xa4]
+    ldur q16, [sp, #-16]
+    adrp x16, _g_zoom_speed_return@PAGE
+    ldr x16, [x16, _g_zoom_speed_return@PAGEOFF]
+    br x16
+
+    // The keyboard rotation commands: `fmov s2, w8 ; fmul s1, s1, s2 ; fmul s0, s1, s0 ;
+    // str s0, [x22, #0x9C]`.
+    .p2align 2
+    .private_extern _RotationSpeedStub
+_RotationSpeedStub:
+    fmov s2, w8
+    fmul s1, s1, s2
+    fmul s0, s1, s0
+    stur q16, [sp, #-16]
+    adrp x16, _g_rotation_speed_mult@PAGE
+    ldr s16, [x16, _g_rotation_speed_mult@PAGEOFF]
+    fmul s16, s0, s16
+    str s16, [x22, #0x9c]
+    ldur q16, [sp, #-16]
+    adrp x16, _g_rotation_speed_return@PAGE
+    ldr x16, [x16, _g_rotation_speed_return@PAGEOFF]
+    br x16
+
     // Where the stubs continue: the original functions.
     .data
     .p2align 3
@@ -131,5 +184,22 @@ _g_camera_target_original:
     .private_extern _g_raycast_original
 _g_raycast_original:
     .quad 0
+    // Where the camera tweak stubs jump back to.
+    .private_extern _g_pitch_update_return
+_g_pitch_update_return:
+    .quad 0
+    .private_extern _g_zoom_speed_return
+_g_zoom_speed_return:
+    .quad 0
+    .private_extern _g_rotation_speed_return
+_g_rotation_speed_return:
+    .quad 0
+    // The speed multipliers, set before each camera command by ObserveCameraInput.
+    .private_extern _g_zoom_speed_mult
+_g_zoom_speed_mult:
+    .float 1.0
+    .private_extern _g_rotation_speed_mult
+_g_rotation_speed_mult:
+    .float 1.0
 
 #endif

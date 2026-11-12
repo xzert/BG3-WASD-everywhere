@@ -10,9 +10,10 @@ CONFIG := $(BUILD)/$(NAME).toml
 CXXFLAGS ?= -O2 -g
 CXXFLAGS += -std=c++20 -Wall -Wextra -Isrc -I../linux/src -DBG3WASD_VERSION=\"$(VERSION)\"
 MAC_FLAGS := -arch arm64 -mmacosx-version-min=11.0
-# Shared with the Linux port: the log, the key bindings in inputconfig_p1.json, the config file and
-# the hotkey rules.
-SHARED := ../linux/src/log.cpp ../linux/src/inputconfig.cpp ../linux/src/settings_file.cpp ../linux/src/hotkeys.cpp
+# Shared with the Linux port: the log, the key bindings in inputconfig_p1.json, the config file, the
+# hotkey rules and the camera tweaks.
+SHARED := ../linux/src/log.cpp ../linux/src/inputconfig.cpp ../linux/src/settings_file.cpp ../linux/src/hotkeys.cpp \
+	../linux/src/camera_tweaks.cpp
 HEADERS := $(wildcard src/*.hpp) $(wildcard ../linux/src/*.hpp) ../linux/src/keymap.inc
 SOURCES := src/main.mm src/keycodes.cpp src/macho.cpp src/arm64.cpp src/patterns.cpp $(SHARED)
 # What symtest checks on any host.

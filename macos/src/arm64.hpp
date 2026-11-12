@@ -27,6 +27,13 @@ bool DecodeByteAccess(uint32_t instruction, bool& store, int& rt, int& rn, uint3
 // cbz/cbnz: the branch target, for an instruction at `pc`.
 bool DecodeCompareBranch(uint32_t instruction, uint64_t pc, bool& nonzero, int& rt, uint64_t& target);
 
+// The target of a branch at `pc`: B, BL, B.cond, CBZ/CBNZ or TBZ/TBNZ.
+bool DecodeBranch(uint32_t instruction, uint64_t pc, uint64_t& target);
+
+// Whether any branch in code[0..count) (starting at `pc`) lands strictly inside
+// [first, first + size): code there can't be replaced by a jump.
+bool BranchesInto(const uint32_t* code, size_t count, uint64_t pc, uint64_t first, size_t size);
+
 // A byte loaded or stored through `adrp xn, page` and `ldrb/strb wt, [xn, #offset]`.
 struct ByteAccess {
     size_t index;  // of the ldrb/strb in the code

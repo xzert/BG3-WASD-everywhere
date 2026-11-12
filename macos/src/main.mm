@@ -52,6 +52,7 @@
 #include <vector>
 
 #include "arm64.hpp"
+#include "camera_tweaks.hpp"
 #include "hotkeys.hpp"
 #include "inputconfig.hpp"
 #include "keycodes.hpp"
@@ -77,6 +78,15 @@ void CameraTargetProbe();
 extern void* g_camera_target_original;
 void RaycastProbe();
 extern void* g_raycast_original;
+// The camera tweak stubs, where they jump back to, and the speed multipliers they apply.
+void PitchUpdateStub();
+void ZoomSpeedStub();
+void RotationSpeedStub();
+extern uint64_t g_pitch_update_return;
+extern uint64_t g_zoom_speed_return;
+extern uint64_t g_rotation_speed_return;
+extern float g_zoom_speed_mult;
+extern float g_rotation_speed_mult;
 }
 
 namespace {
@@ -114,6 +124,9 @@ std::atomic<bool> g_mode_toggles_mouselook{ false };  // TogglingMovementModeAls
 std::atomic<bool> g_prevent_clicking_character{ true };  // PreventClickingActiveCharacter
 std::atomic<bool> g_prevent_clicking_occluders{ false };  // PreventClickingCameraOccluders
 std::atomic<const uint8_t*> g_camera_behavior{ nullptr };  // ecl::GameCameraBehavior, from CalcCamTargetDest
+using CameraPitchFn = float (*)(const uint8_t* camera, bool a, bool b);
+CameraPitchFn g_camera_pitch = nullptr;  // ecl::GameCameraBehavior::GetCameraPitchDegrees
+double g_mouse_dy_rest = 0.0;            // main thread: the fraction of a pixel not yet passed on
 
 // Main thread only, like sendEvent:.
 bool g_autoforward = false;
@@ -222,6 +235,7 @@ void LoadSettings(bool first)
     g_mode_toggles_mouselook = settings.toggling_movement_mode_also_toggles_camera_rotation;
     g_prevent_clicking_character = settings.prevent_clicking_active_character;
     g_prevent_clicking_occluders = settings.prevent_clicking_camera_occluders;
+    camera_tweaks::Configure(settings.camera_tweaks);
     if (first) {
         g_mode_toggled = settings.is_character_movement_default;
         g_walking_toggled = settings.is_walking_default;
@@ -1314,6 +1328,68 @@ void InstallUnclickableCharacter(const macho::Image& image, const uintptr_t* add
         g_prevent_clicking_character ? "on" : "off in the config");
 }
 
+// Replaces the 16 bytes at `site` with a jump to `stub`, which does the same work and jumps back.
+bool JumpToStub(uintptr_t site, void (*stub)())
+{
+    uint32_t jump[4];
+    arm64::EncodeAbsoluteJump(reinterpret_cast<uintptr_t>(stub), jump);
+    return WriteCode(site, jump, sizeof jump);
+}
+
+// Camera tweaks ported from Native Camera Tweaks by ersh1 (linux/src/camera_tweaks.cpp).
+// - The free pitch: UpdateGameCameraBehavior's call of GetCameraPitchDegrees, the pitch the camera
+//   turns to, goes through PitchUpdateHook. GetCameraPitchDegrees itself starts with branches, so
+//   it can't take an inline hook; the call site is replaced instead (PitchUpdateStub).
+// - The camera definitions in eoc::CameraSettings come from the code just before that call.
+// - Zoom and keyboard rotation speed: OnInputEvent's stores of the speed into the camera go
+//   through ZoomSpeedStub and RotationSpeedStub, which multiply it.
+void InstallCameraTweaks(const macho::Image& image, const uintptr_t* addresses, intptr_t slide)
+{
+    const uintptr_t pitch_function = addresses[symbols::GetCameraPitchDegrees];
+    const uintptr_t update = addresses[symbols::UpdateGameCameraBehavior];
+    size_t count = 0;
+    const uint32_t* code = pitch_function ? FunctionCode(image, update, count) : nullptr;
+    patterns::PitchUpdate found;
+    if (!code || !patterns::FindPitchUpdate(code, count, update, pitch_function, found)) {
+        LOG_WARN("Camera tweaks off: the pitch update in UpdateGameCameraBehavior wasn't found");
+    } else {
+        camera_tweaks::GameLayout layout;
+        layout.settings = reinterpret_cast<uint8_t* const*>(found.settings_pointer);
+        layout.override_flag = found.override_flag;
+        layout.exploration = found.exploration;
+        layout.combat = found.combat;
+        layout.override_definition = found.override_definition;
+        camera_tweaks::SetGameLayout(layout);
+        const uintptr_t site = update + 4 * uintptr_t(found.index);
+        g_camera_pitch = reinterpret_cast<CameraPitchFn>(pitch_function);
+        g_pitch_update_return = site + 16;
+        if (JumpToStub(site, &PitchUpdateStub)) {
+            LOG_INFO("Camera tweaks: settings %#lx (definitions +%#x, +%#x, +%#x, flag +%#x), pitch update %#lx",
+                (unsigned long)(found.settings_pointer - slide), found.exploration, found.combat,
+                found.override_definition, found.override_flag, (unsigned long)(site - slide));
+        }
+    }
+
+    // The speeds need the OnInputEvent hook, which sets the multipliers before each command.
+    const uintptr_t input = addresses[symbols::CameraSystemOnInputEvent];
+    const uint32_t* input_code = g_camera_input_original ? FunctionCode(image, input, count) : nullptr;
+    uint64_t zoom_next = 0;
+    const long zoom = input_code ? patterns::FindZoomSpeedStore(input_code, count, input, zoom_next) : -1;
+    const long rotation = input_code ? patterns::FindRotationSpeedStore(input_code, count, input) : -1;
+    if (zoom < 0 || rotation < 0) {
+        LOG_WARN("Camera tweaks: the game's zoom and rotation speeds stay, their stores weren't found");
+        return;
+    }
+    const uintptr_t zoom_site = input + 4 * uintptr_t(zoom);
+    const uintptr_t rotation_site = input + 4 * uintptr_t(rotation);
+    g_zoom_speed_return = zoom_next;
+    g_rotation_speed_return = rotation_site + 16;
+    if (JumpToStub(zoom_site, &ZoomSpeedStub) && JumpToStub(rotation_site, &RotationSpeedStub)) {
+        LOG_INFO("Camera tweaks: zoom speed store %#lx, rotation speed store %#lx", (unsigned long)(zoom_site - slide),
+            (unsigned long)(rotation_site - slide));
+    }
+}
+
 // PreventClickingCameraOccluders, like PreventClickingCameraOccludersCavehook on Windows: in Character
 // mode the cursor ignores what stands between the camera and the character, such as trailing
 // companions. The picking ray of ecl::PickingHelper::GameObjectPick then starts the camera's zoom
@@ -1590,9 +1666,17 @@ bool OnEvent(id application, NSEvent* event)
     case NSEventTypeMouseMoved:
     case NSEventTypeLeftMouseDragged:
     case NSEventTypeRightMouseDragged:
-    case NSEventTypeOtherMouseDragged:
+    case NSEventTypeOtherMouseDragged: {
         OnRotationMouseMoved(event);
+        // The camera tweaks' free pitch: whole pixels, the rest is kept for the next event.
+        g_mouse_dy_rest += event.deltaY;
+        const int dy = int(g_mouse_dy_rest);
+        g_mouse_dy_rest -= dy;
+        if (dy) {
+            camera_tweaks::OnMouseMotion(dy);
+        }
         return false;
+    }
     default:
         return false;
     }
@@ -1692,6 +1776,7 @@ void Run()
     InstallMouselook(addresses);
     InstallUnclickableCharacter(image, addresses);
     InstallOccluderHooks(addresses);
+    InstallCameraTweaks(image, addresses, slide);
 
     if (SwizzleSendEvent()) {
         LOG_INFO("Hotkeys enabled (-[BG3Application sendEvent:])");
@@ -1779,12 +1864,27 @@ extern "C" const float* AdjustRayStart(const float* start, const float* end, uin
     return moved;
 }
 
+// Called by PitchUpdateStub in UpdateGameCameraBehavior, on the game thread: the pitch the camera
+// turns to. The camera's mode flags at +0xA8 have bit 8 (kMouseRotation in Native Camera Tweaks)
+// set while the player rotates it with the mouse.
+extern "C" float PitchUpdateHook(uint8_t* camera)
+{
+    const float pitch = g_camera_pitch(camera, false, false);
+    const bool rotating = camera && (camera[0xA9] & 0x01);
+    return camera_tweaks::OnUpdatePitch(camera, pitch, rotating, IsControllerMode());
+}
+
 // Called by the stub in stubs.S with the arguments of ecl::CameraSystem::OnInputEvent.
 extern "C" void ObserveCameraInput(void* self, const void* entity, const uint8_t* event)
 {
     if (!event) {
         return;
     }
+    // Zoom and rotation speed (camera tweaks), applied by the speed stubs inside OnInputEvent.
+    const camera_tweaks::CommandSpeed speed =
+        camera_tweaks::BeforeCameraCommand(const_cast<uint8_t*>(event), IsControllerMode());
+    g_zoom_speed_mult = speed.zoom;
+    g_rotation_speed_mult = speed.keyboard_rotation;
     // In Character mode the camera doesn't get the movement keys' camera actions: their id becomes
     // 0, as ExecuteCameraCommandHook does on Windows and on Linux.
     uint32_t action;

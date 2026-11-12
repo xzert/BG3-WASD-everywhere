@@ -39,7 +39,7 @@ load there, so the port is a separate `LD_PRELOAD` library in [`linux/`](linux/)
 The fork also starts a port for the native macOS version on Apple Silicon, in [`macos/`](macos/).
 It is a library that a small launcher loads into the game when Steam starts it.
 
-The Linux port also includes the camera tweaks of
+The Linux and macOS ports also include the camera tweaks of
 [Native Camera Tweaks](https://github.com/ersh1/BG3_NativeCameraTweaks) by ersh1, which most
 players use together with BG3WASD: a free camera pitch, wider zoom limits, FOV and offsets.
 
@@ -77,7 +77,7 @@ Both ports support game version **4.1.1.7631656** (Hotfix #36).
 | No edge panning in Character mode | ✅ | ✅ | — |
 | Rotate + left click moves forward | ✅ | ✅ | ✅ |
 | Unclickable active character and camera occluders | ✅ | ✅ ⁵ | ✅ ⁵ |
-| Camera tweaks: free pitch, zoom limits, FOV, offsets ([Native Camera Tweaks](https://www.nexusmods.com/baldursgate3/mods/945)) | separate mod | ✅ ⁶ | — |
+| Camera tweaks: free pitch, zoom limits, FOV, offsets ([Native Camera Tweaks](https://www.nexusmods.com/baldursgate3/mods/945)) | separate mod | ✅ ⁶ | ✅ ⁶ |
 | Blocking click-to-move (`BlockInteractMove`) | ✅ | — | — |
 | Movement mode follows turn-based mode (FTB) | ✅ | ✅ | — |
 | Movement keys bound automatically | ✅ | ✅ ³ | ✅ ³ |
@@ -107,6 +107,7 @@ Notes on the macOS column:
 
 - ¹ ² ³ As on Linux. Mouselook's pause in dialogs isn't checked in game yet.
 - ⁵ The active character and camera occluders (`PreventClickingCameraOccluders`).
+- ⁶ As on Linux.
 - The config has only the settings the port supports so far. Key names are the same as on Linux;
   on a Mac keyboard, `alt` is Option and `gui` is Command.
 

@@ -97,6 +97,153 @@ IsCharacterMovementDefault = true
 # [true, false]
 
 
+# Camera tweaks, ported from Native Camera Tweaks by ersh1:
+# https://www.nexusmods.com/baldursgate3/mods/945
+# The key names are the same as in BG3NativeCameraTweaks.toml, so you can copy your values over.
+# Not ported yet: the gamepad settings, keeping the camera above the floor
+# (UnlockedPitchLimitClipping) and ResetZoomOnZoneChange.
+
+[CameraTweaks]
+
+CameraTweaks = true
+# Turns all the camera tweaks below on or off. Vanilla is false.
+# [true, false]
+
+UnlockedPitchInitialValue = 25.0
+# The pitch, in degrees, the free camera starts with.
+
+UnlockedPitchClampSpeed = 5.0
+# How fast the pitch returns into its limits, or to the game's pitch when it gets locked again.
+
+
+[ExplorationPitch]
+
+ExplorationUnlockPitch = true
+# Out of combat, move the mouse up and down while you rotate the camera to change its pitch.
+# [true, false]
+
+ExplorationKeepTacticalPitchLocked = false
+# Keep the game's pitch in the tactical camera (the far top-down view).
+# [true, false]
+
+ExplorationUnlockedPitchMin = 0.0
+ExplorationUnlockedPitchMax = 85.0
+# The limits of the free pitch, in degrees: 0 looks straight ahead, 85 almost straight down.
+# Native Camera Tweaks allows down to -85, but below 0 the camera can go under the ground here: the
+# check that keeps it above the floor isn't ported yet.
+# [-89, 89]
+
+ExplorationOverrideLockedPitch = false
+# Change the game's own pitch, used when the pitch isn't free. Close is when zoomed in, Far when
+# zoomed out. The values shown are vanilla.
+ExplorationLockedPitchClose = 19.05
+ExplorationLockedPitchFar = 40.71
+ExplorationLockedTacticalPitchClose = 85.55
+ExplorationLockedTacticalPitchFar = 85.55
+ExplorationLockedAltPitchClose = 32.69
+ExplorationLockedAltPitchFar = 39.7
+
+
+[ExplorationZoom]
+
+ExplorationOverrideZoom = true
+# Change the zoom limits. Vanilla is 3.5 to 12, tactical 10 to 50, alternative 10 to 40.
+# [true, false]
+ExplorationZoomMin = 0.5
+ExplorationZoomMax = 20.0
+ExplorationTacticalZoomMin = 10.0
+ExplorationTacticalZoomMax = 50.0
+ExplorationAltZoomMin = 10.0
+ExplorationAltZoomMax = 40.0
+
+
+[ExplorationFOV]
+
+ExplorationOverrideFOV = false
+# Change the field of view, in degrees. The values shown are vanilla.
+# [true, false]
+ExplorationFOVClose = 55.0
+ExplorationFOVFar = 55.0
+ExplorationTacticalFOV = 25.0
+ExplorationAltFOVClose = 45.0
+ExplorationAltFOVFar = 45.0
+
+
+[ExplorationOffset]
+
+ExplorationOverrideOffset = false
+# Move the camera sideways (an over-the-shoulder view) or up. The values shown are vanilla.
+# [true, false]
+ExplorationHorizontalOffsetMult = 0.0
+ExplorationVerticalOffsetMult = 0.8
+
+
+[CombatPitch]
+
+# The same as the Exploration settings above, in combat.
+CombatUnlockPitch = true
+CombatKeepTacticalPitchLocked = false
+CombatUnlockedPitchMin = 0.0
+CombatUnlockedPitchMax = 85.0
+CombatOverrideLockedPitch = false
+CombatLockedPitchClose = 32.73
+CombatLockedPitchFar = 52.42
+CombatLockedTacticalPitchClose = 85.55
+CombatLockedTacticalPitchFar = 85.55
+CombatLockedAltPitchClose = 32.69
+CombatLockedAltPitchFar = 39.7
+
+
+[CombatZoom]
+
+# Vanilla is 4 to 15, tactical 10 to 50, alternative 10 to 40.
+CombatOverrideZoom = true
+CombatZoomMin = 0.5
+CombatZoomMax = 20.0
+CombatTacticalZoomMin = 10.0
+CombatTacticalZoomMax = 50.0
+CombatAltZoomMin = 10.0
+CombatAltZoomMax = 40.0
+
+
+[CombatFOV]
+
+CombatOverrideFOV = false
+CombatFOVClose = 55.0
+CombatFOVFar = 55.0
+CombatTacticalFOV = 25.0
+CombatAltFOVClose = 45.0
+CombatAltFOVFar = 45.0
+
+
+[CombatOffset]
+
+CombatOverrideOffset = false
+CombatHorizontalOffsetMult = 0.0
+CombatVerticalOffsetMult = 0.8
+
+
+[Mouse]
+
+MouseCameraRotationMult = 1.0
+# Speed of the camera rotation with the mouse. 1.0 is vanilla.
+
+MousePitchMult = 0.25
+# Speed of the free pitch with the mouse.
+
+MouseZoomMult = 0.5
+# Speed of the zoom with the mouse wheel. 1.0 is vanilla.
+
+InvertMousePitch = false
+# [true, false]
+
+
+[Keyboard]
+
+KeyboardCameraRotationMult = 2.0
+# Speed of the camera rotation with the keys. 1.0 is vanilla.
+
+
 # Not available on macOS yet, and ignored if present: SwitchToWalkingAfterCombat,
 # AutoToggleMovementMode, BlockInteractMove.
 

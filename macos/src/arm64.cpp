@@ -62,6 +62,39 @@ bool DecodeCompareBranch(uint32_t instruction, uint64_t pc, bool& nonzero, int& 
     return true;
 }
 
+bool DecodeBranch(uint32_t instruction, uint64_t pc, uint64_t& target)
+{
+    // Sign-extends the `bits`-bit field at `shift` and scales it to bytes.
+    auto offset = [instruction](int shift, int bits) {
+        int64_t words = int64_t((instruction >> shift) & ((uint32_t(1) << bits) - 1));
+        if (words & (int64_t(1) << (bits - 1))) {
+            words -= int64_t(1) << bits;
+        }
+        return words * 4;
+    };
+    if ((instruction & 0x7C000000) == 0x14000000) {  // B, BL
+        target = pc + uint64_t(offset(0, 26));
+    } else if ((instruction & 0xFF000010) == 0x54000000 || (instruction & 0x7E000000) == 0x34000000) {
+        target = pc + uint64_t(offset(5, 19));  // B.cond, CBZ, CBNZ
+    } else if ((instruction & 0x7E000000) == 0x36000000) {  // TBZ, TBNZ
+        target = pc + uint64_t(offset(5, 14));
+    } else {
+        return false;
+    }
+    return true;
+}
+
+bool BranchesInto(const uint32_t* code, size_t count, uint64_t pc, uint64_t first, size_t size)
+{
+    for (size_t i = 0; i < count; ++i) {
+        uint64_t target = 0;
+        if (DecodeBranch(code[i], pc + 4 * i, target) && target > first && target < first + size) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::vector<ByteAccess> FindByteAccesses(const uint32_t* code, size_t count, uint64_t pc)
 {
     std::vector<ByteAccess> found;

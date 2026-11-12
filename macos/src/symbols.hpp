@@ -35,6 +35,8 @@ enum Index {
     CalcCamTargetDest,         // ecl::CameraSystem::CalcCamTargetDest(EntityView<GameCameraBehavior, ...> const&): x1 points at the GameCameraBehavior*
     PhysXSceneVtable,          // vtable for phx::PhysXScene
     RaycastAll,                // phx::PhysXScene::RaycastAll(Vector3f const& start, Vector3f const& end, ...) const
+    GetCameraPitchDegrees,     // ecl::GameCameraBehavior::GetCameraPitchDegrees(bool, bool) const
+    UpdateGameCameraBehavior,  // ecl::CameraSystem::UpdateGameCameraBehavior(ecs::WorldView<...>&, ls::GameTime const&, ...)
     Count
 };
 
@@ -66,6 +68,35 @@ inline constexpr const char* kNames[Count] = {
     "__ZN3ecl12CameraSystem17CalcCamTargetDestERKN3ecs8_private10EntityViewIJN2ls8TypeListIJNS_18GameCameraBehaviorEKNS_17EocCameraBehaviorEKNS4_18TransformComponentEEEENS5_IJEEEEEE",
     "__ZTVN3phx10PhysXSceneE",
     "__ZNK3phx10PhysXScene10RaycastAllERK8Vector3fS3_RN2ls13PhysicsHitAllENS4_12EPhysicsTypeEjjNS4_15EPhysicsContextEjjNS4_8OptionalIRNS4_26PhysicsSceneScopedReadLockEEE",
+    "__ZNK3ecl18GameCameraBehavior21GetCameraPitchDegreesEbb",
+    // UpdateGameCameraBehavior: the WorldView lists some 90 component types.
+    "__ZN3ecl12CameraSystem24UpdateGameCameraBehaviorERN3ecs9WorldViewIJNS_17AtmosphereTriggerENS"
+    "_6camera45ClearScreenFadeRequestManualOneFrameComponentENS4_39EnterPhotoModeRequestSingleton"
+    "ComponentENS4_42ScreenFadeToRequestManualOneFrameComponentENS_17CameraLockTriggerENS_9Charac"
+    "terENS_17EocCameraBehaviorENS_18GameCameraBehaviorENS_15LightingTriggerENS_19SceneCameraBeha"
+    "viorENS_23SpectatorCameraBehaviorEN2ls21ArcBallCameraBehaviorENSF_15CameraComponentENSF_21De"
+    "faultCameraBehaviorENSF_20EditorCameraBehaviorENSF_20EffectCameraBehaviorENSF_14LevelCompone"
+    "ntENSF_19OrthoCameraBehaviorENSF_18TransformComponentENSF_15VisualComponentENSF_22WorldMapCa"
+    "meraBehaviorEKNS_20CameraBlockerTriggerEKNS4_32PhotoModeCameraBehaviorComponentEKNS4_23Platf"
+    "ormTargetComponentEKNS4_21SelectorModeComponentEKNS4_15TargetComponentEKNS_18character_creat"
+    "ion15CameraComponentEKNS10_21SessionStateComponentEKSA_KNS_27InvisibilityVisualComponentEKNS"
+    "_7SceneryEKNS_11screen_fade37ScreenFadeToFinishedOneFrameComponentEKNS1A_45ScreenFadeToReque"
+    "stCancelledOneFrameComponentEKNS1A_29ScreenFadeVisualDataComponentEKNS_16SpectatorTriggerEKN"
+    "S_10spell_cast14StateComponentEKNS_11splitscreen27AnimationSingletonComponentEKNS1M_22GoalSi"
+    "ngletonComponentEKNS1M_29MergedFocusSingletonComponentEKNS1M_25PlayersSingletonComponentEKNS"
+    "1M_35SelectedAnimationSingletonComponentEKNS1M_22ViewSingletonComponentEKNS_39TimelineActorL"
+    "eftEventOneFrameComponentEKNS_27UnloadSessionEventComponentEKN3eoc14BoundComponentEKNS23_9ch"
+    "aracter18CharacterComponentEKNS23_18character_creation10definition17CreationComponentEKNS23_"
+    "22ClientControlComponentEKNS23_6combat20ParticipantComponentEKNS23_10controller19LocomotionC"
+    "omponentEKNS2I_18NudgeDataComponentEKNS23_3ftb20ParticipantComponentEKNS2N_16RespectComponen"
+    "tEKNS23_4item13ItemComponentEKNS23_4jump13InfoComponentEKNS23_17MovementComponentEKNS23_11mu"
+    "ltiplayer13UserComponentEKNS23_5party17FollowerComponentEKNS33_15MemberComponentEKNS33_13Vie"
+    "wComponentEKNS23_10photo_mode16SessionComponentEKNS23_15PlayerComponentEKNS23_10spell_cast18"
+    "IsCastingComponentEKNS23_7trigger13TreeComponentEKNS23_18TurnBasedComponentEKNS23_18TurnOrde"
+    "rComponentEKNSF_14DebugComponentEKNSF_28FadeableObstructionComponentEKNSF_16PhysicsComponent"
+    "EKNSF_15SplineComponentEKNSF_13TerrainObjectEKNSF_7trigger13AreaComponentEKNSF_4uuid9Compone"
+    "ntEEEERKNSF_8GameTimeERKNS1_8_private10EntityViewIJNSF_8TypeListIJSB_SH_S15_KSN_EEENS4C_IJSV"
+    "_SX_S2M_EEEEEE",
 };
 
 // A vtable symbol points at the offset-to-top entry; virtual function slots start 16 bytes later.

@@ -301,6 +301,34 @@ bool CheckSlice(const std::vector<uint8_t>& file, uint32_t cputype, const char* 
         }
         std::printf("\n");
         ok = ok && flag && check >= 0;
+
+        // Camera tweaks: the pitch update call and the camera definitions before it, and the speed
+        // stores in OnInputEvent. Each is a 16-byte window the library replaces with a jump.
+        const uint64_t update = addresses[symbols::UpdateGameCameraBehavior];
+        const std::vector<uint32_t> update_code = CodeOf(image, slice, size, update);
+        patterns::PitchUpdate pitch;
+        const bool pitch_found = patterns::FindPitchUpdate(update_code.data(), update_code.size(), update,
+            addresses[symbols::GetCameraPitchDegrees], pitch);
+        if (pitch_found) {
+            std::printf("  Camera tweaks: settings %#" PRIx64 ", flag +%#x, definitions +%#x +%#x +%#x, "
+                        "pitch update %#" PRIx64 "\n",
+                pitch.settings_pointer, pitch.override_flag, pitch.exploration, pitch.combat,
+                pitch.override_definition, update + 4 * uint64_t(pitch.index));
+        } else {
+            std::printf("  Camera tweaks: pitch update NOT FOUND\n");
+        }
+        const uint64_t input = addresses[symbols::CameraSystemOnInputEvent];
+        const std::vector<uint32_t> input_code = CodeOf(image, slice, size, input);
+        uint64_t zoom_next = 0;
+        const long zoom = patterns::FindZoomSpeedStore(input_code.data(), input_code.size(), input, zoom_next);
+        const long rotation = patterns::FindRotationSpeedStore(input_code.data(), input_code.size(), input);
+        if (zoom >= 0 && rotation >= 0) {
+            std::printf("  Camera tweaks: zoom speed store %#" PRIx64 " (then %#" PRIx64 "), rotation speed store %#" PRIx64 "\n",
+                input + 4 * uint64_t(zoom), zoom_next, input + 4 * uint64_t(rotation));
+        } else {
+            std::printf("  Camera tweaks: speed stores NOT FOUND (zoom %ld, rotation %ld)\n", zoom, rotation);
+        }
+        ok = ok && pitch_found && zoom >= 0 && rotation >= 0;
     }
     return ok;
 }
