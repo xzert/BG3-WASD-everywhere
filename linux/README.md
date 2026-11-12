@@ -48,7 +48,9 @@ an error and stays inactive.
   `PreventLosingChaseCamTargetHook`). On Linux, `GetViewport` is inlined. The mod rewrites the `jne`
   that skips edge panning with a gamepad into `nop ; jmp`, a two-byte change made with one store,
   and switches it back when the mode or combat changes.
-- `bg3-wasd-everywhere.toml` is reloaded about a second after it changes.
+- `bg3-wasd-everywhere.toml` is reloaded one to two seconds after it changes. The game's first `bg3`
+  process forks the one that plays, so the mod has no threads of its own: the main thread checks the
+  file's inotify watch once a second.
 - Movement keys are bound automatically, like `InputconfigPatcher` on Windows.
   - What it does: binds `CharacterMoveForward/Backward/Left/Right` to the keys of
     `CameraForward/Backward/Left/Right` (or the defaults), drops extra `key:unknown` entries, and, when
@@ -71,7 +73,7 @@ an error and stays inactive.
     ground further behind the character, the character stays clickable, as in vanilla. Otherwise a
     low camera sent the character running off to a point far behind them. The ray comes from the
     camera occluders' stub, which sees `GameObjectPick`'s ray just before that function asks
-    `IsFading`; the ground is the plane of the camera's root position.
+    `IsFading`; the ground is at the height of the feet, from the camera's fields.
 - `PreventClickingCameraOccluders` (off by default, as on Windows): in Character mode the picking
   ray of `ecl::PickingHelper::GameObjectPick` starts the camera's zoom distance further along, so
   what stands between the camera and the character can't be clicked. A steep or distant camera

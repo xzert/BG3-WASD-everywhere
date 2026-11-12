@@ -81,8 +81,8 @@ void SetSettingsPath(std::string path);
 // movement mode and walking state.
 void ReloadSettings();
 
-// Watches bg3-wasd-everywhere.toml in a background thread. A change requests a reload, which the main thread
-// performs (TakeReloadRequest), so bindings never change under the SDL event handler.
+// Watches bg3-wasd-everywhere.toml. The main thread checks for changes once per frame
+// (TakeReloadRequest) and reloads, so bindings never change under the SDL event handler.
 void WatchSettingsFile();
 bool TakeReloadRequest();
 

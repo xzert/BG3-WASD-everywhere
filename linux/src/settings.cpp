@@ -1,6 +1,5 @@
 #include "settings.hpp"
 
-#include <poll.h>
 #include <sys/inotify.h>
 #include <unistd.h>
 
@@ -8,7 +7,6 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
-#include <thread>
 
 #include "camera.hpp"
 #include "camera_tweaks.hpp"
@@ -28,22 +26,63 @@ std::string& SettingsPath()
 }
 
 bool g_loaded_once = false;
-std::atomic<bool> g_reload_requested{ false };
+// The game's first process forks the one that plays and then only waits for it, so a watcher
+// thread started from the constructor would stay behind in the parent. The inotify descriptor is
+// inherited instead, and the playing process's main thread reads it.
+int g_watch_fd = -1;
+std::string& WatchedName()
+{
+    static std::string name;
+    return name;
+}
+int64_t g_last_change_ms = 0;  // the latest change not yet reloaded, 0 if none
 
 }  // namespace
 
 void SetSettingsPath(std::string path) { SettingsPath() = std::move(path); }
 
-bool TakeReloadRequest() { return g_reload_requested.exchange(false); }
+bool TakeReloadRequest()
+{
+    // Once a second is enough: switching from the editor back to the game takes about that long.
+    // The clock is read without a system call; the read() returns at once when nothing changed.
+    constexpr int64_t kCheckIntervalMs = 1000;
+    static int64_t last_check_ms = 0;
+    const int64_t now = NowMs();
+    if (g_watch_fd < 0 || now - last_check_ms < kCheckIntervalMs) {
+        return false;
+    }
+    last_check_ms = now;
+    alignas(inotify_event) char buffer[4096];
+    for (;;) {
+        const ssize_t length = read(g_watch_fd, buffer, sizeof buffer);
+        if (length <= 0) {
+            break;
+        }
+        for (ssize_t offset = 0; offset < length;) {
+            const auto* event = reinterpret_cast<const inotify_event*>(buffer + offset);
+            if (event->len && WatchedName() == event->name) {
+                g_last_change_ms = now;
+            }
+            offset += sizeof(inotify_event) + event->len;
+        }
+    }
+    // Reload at the first check without new changes: editors may write the file in several steps.
+    // So the config applies one to two seconds after the save.
+    if (g_last_change_ms && g_last_change_ms < now) {
+        g_last_change_ms = 0;
+        return true;
+    }
+    return false;
+}
 
 void WatchSettingsFile()
 {
     const std::string& path = SettingsPath();
     const auto slash = path.rfind('/');
     const std::string dir = slash == std::string::npos ? "." : path.substr(0, slash);
-    const std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+    WatchedName() = slash == std::string::npos ? path : path.substr(slash + 1);
 
-    const int fd = inotify_init1(IN_CLOEXEC);
+    const int fd = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
     // Editors often save by writing a temporary file and renaming it, so watch the directory.
     if (fd < 0 || inotify_add_watch(fd, dir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE) < 0) {
         LOG_WARN("Config changes won't be picked up automatically (inotify on %s: %s)", dir.c_str(),
@@ -53,36 +92,7 @@ void WatchSettingsFile()
         }
         return;
     }
-
-    std::thread([fd, name] {
-        constexpr int kDebounceMs = 1000;  // reload once the file has been quiet for a second
-        alignas(inotify_event) char buffer[4096];
-        bool pending = false;
-        for (;;) {
-            pollfd poll_fd{ fd, POLLIN, 0 };
-            const int ready = poll(&poll_fd, 1, pending ? kDebounceMs : -1);
-            if (ready == 0) {
-                pending = false;
-                g_reload_requested = true;
-                continue;
-            }
-            if (ready < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
-                break;
-            }
-            const ssize_t length = read(fd, buffer, sizeof buffer);
-            for (ssize_t offset = 0; offset < length;) {
-                const auto* event = reinterpret_cast<const inotify_event*>(buffer + offset);
-                if (event->len && name == event->name) {
-                    pending = true;
-                }
-                offset += sizeof(inotify_event) + event->len;
-            }
-        }
-        LOG_WARN("Stopped watching the config file");
-    }).detach();
+    g_watch_fd = fd;
 }
 
 void ReloadSettings()

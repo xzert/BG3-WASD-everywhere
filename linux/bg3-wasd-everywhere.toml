@@ -1,4 +1,4 @@
-# Settings for BG3 WASD Everywhere, the Linux port. The mod reloads this file about a second
+# Settings for BG3 WASD Everywhere, the Linux port. The mod reloads this file a second or two
 # after you save it.
 
 [ModHotkeys]
@@ -26,7 +26,7 @@ HoldWalkspeed = ""
 # If you are walking, holding this key will make you jog.
 
 ReloadConfig = ""
-# Reloads this file. Usually not needed: the mod reloads it about a second after you save it.
+# Reloads this file. Usually not needed: the mod reloads it a second or two after you save it.
 
 
 [CameraRotation]

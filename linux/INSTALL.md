@@ -30,7 +30,7 @@ default). It does this in `inputconfig_p1.json` of every player profile and keep
 - Caps Lock switches between Character and Camera movement.
 - Shift+W toggles autoforward.
 - Hotkeys, walking speed, mouselook and the rotation cursor are set in `bg3-wasd-everywhere.toml`
-  next to `libbg3-wasd-everywhere.so`. The mod reloads it about a second after you save it.
+  next to `libbg3-wasd-everywhere.so`. The mod reloads it a second or two after you save it.
 - Don't replace `libbg3-wasd-everywhere.so` while the game is running.
 
 ## Uninstall

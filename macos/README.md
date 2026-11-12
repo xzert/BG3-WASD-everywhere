@@ -61,7 +61,7 @@ An early port for the native macOS game on Apple Silicon. Supported game version
     ground further behind the character, the character stays clickable, as in vanilla. Otherwise a
     low camera sent the character running off to a point far behind them. The ray comes from the
     `RaycastAll` hook of the camera occluders, which `GameObjectPick` calls just before it asks
-    `IsFading`; the ground is the plane of the camera's root position.
+    `IsFading`; the ground is at the height of the feet, from the camera's fields.
 - `PreventClickingCameraOccluders` (off by default, as on Windows): in Character mode the picking ray
   of `ecl::PickingHelper::GameObjectPick` starts the camera's zoom distance further along, so what
   stands between the camera and the character can't be clicked. As on Windows, a steep or distant

@@ -1287,12 +1287,14 @@ uint64_t IsFadingHook(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64
     // How far behind the character the ray of GameObjectPick comes down to the ground.
     const CodeRange& pick = g_picking_code[0];
     const uint8_t* camera = g_camera_behavior.load(std::memory_order_relaxed);
-    const bool measured = skip && camera && t_picking_ray.valid && caller >= pick.start && caller < pick.end;
-    float behind = 0.0f, root[3] = {};
+    wasd::picking::Measure m{};
+    if (skip && camera && t_picking_ray.valid && caller >= pick.start && caller < pick.end) {
+        m = wasd::picking::GroundDistanceBehind(camera, t_picking_ray);
+    }
+    const bool measured = m.valid;
     const float limit = g_max_click_distance.load(std::memory_order_relaxed);
     if (measured) {
-        behind = wasd::picking::GroundDistanceBehind(camera, t_picking_ray, root);
-        skip = !(behind > limit);
+        skip = !(m.behind > limit);
     }
     const uint64_t result = skip ? 1 : g_is_fading(a0, a1, a2, a3, a4, a5, a6, a7);
 
@@ -1302,8 +1304,9 @@ uint64_t IsFadingHook(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64
     if (last_state.exchange(state) != state) {
         if (measured) {
             LOG_INFO("Active character %s: the ray reaches the ground %.1f m behind it, limit %.1f "
-                     "(camera %.1f m above the character)",
-                skip ? "skipped by picking" : "kept clickable", behind, limit, t_picking_ray.start[1] - root[1]);
+                     "(camera %.1f m above the feet, camera root %.2f m above them)",
+                skip ? "skipped by picking" : "kept clickable", m.behind, limit, t_picking_ray.start[1] - m.feet,
+                m.offset);
         } else {
             LOG_INFO("Picking asks about the active character in %s mode: %s",
                 IsCharacterMode() ? "Character" : "Camera",

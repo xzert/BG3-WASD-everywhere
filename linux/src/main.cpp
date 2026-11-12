@@ -405,24 +405,25 @@ bool PickingIsFadingHook(uint64_t entity, const void* view, int flag)
     }
     const auto caller = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
     const uint8_t* camera = state.camera.load(std::memory_order_relaxed);
-    float behind = 0.0f, root[3] = {};
-    const bool measured = camera && t_picking_ray.valid && AfterPickingRay(caller);
-    if (measured) {
-        behind = picking::GroundDistanceBehind(camera, t_picking_ray, root);
+    picking::Measure m{};
+    if (camera && t_picking_ray.valid && AfterPickingRay(caller)) {
+        m = picking::GroundDistanceBehind(camera, t_picking_ray);
     }
+    const bool measured = m.valid;
     const float limit = state.max_click_distance_behind_character.load(std::memory_order_relaxed);
-    const bool skip = !measured || !(behind > limit);
+    const bool skip = !measured || !(m.behind > limit);
 
     // The decision, logged when it changes.
     static std::atomic<int> last_state{ -1 };
     const int decision = !measured ? 0 : skip ? 1 : 2;
     if (last_state.exchange(decision) != decision) {
         if (!measured) {
-            LOG_INFO("Active character skipped by picking (no picking ray to measure)");
+            LOG_INFO("Active character skipped by picking (no picking ray or camera to measure)");
         } else {
             LOG_INFO("Active character %s: the ray reaches the ground %.1f m behind it, limit %.1f "
-                     "(camera %.1f m above the character)",
-                skip ? "skipped by picking" : "kept clickable", behind, limit, t_picking_ray.start[1] - root[1]);
+                     "(camera %.1f m above the feet, camera root %.2f m above them)",
+                skip ? "skipped by picking" : "kept clickable", m.behind, limit, t_picking_ray.start[1] - m.feet,
+                m.offset);
         }
     }
     return skip ? true : g_is_fading(entity, view, flag);
