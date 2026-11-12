@@ -91,4 +91,19 @@ struct UnclickableCharacterAddresses {
 bool FindUnclickableCharacterAddresses(const uint8_t* text, size_t size, uintptr_t text_address,
     UnclickableCharacterAddresses& out, std::string& error);
 
+// Camera occluders (PreventClickingCameraOccluders). The macOS build keeps these names.
+struct OccluderAddresses {
+    // ecl::GameCameraBehavior::GetCameraPitchDegrees(this, bool, bool) -> xmm0. The camera update
+    // calls it every frame, so its `this` is the camera; it starts with `cmp byte [rdi+0x1E4], 0`.
+    uintptr_t camera_pitch = 0;
+    // In ecl::PickingHelper::GameObjectPick::ExecuteWTKernel, the picking ray:
+    // `mov rcx, [rsp+0xB0] ; call [rax+0x48]` (11 bytes), the call of phx::PhysXScene::RaycastAll(this,
+    // start in rsi, end in rdx, ...). Windows calls the same function through slot 0x40: MSVC has one
+    // destructor slot where the Itanium ABI has two.
+    uintptr_t raycast_site = 0;
+};
+
+bool FindOccluderAddresses(const uint8_t* text, size_t size, uintptr_t text_address, OccluderAddresses& out,
+    std::string& error);
+
 }  // namespace wasd

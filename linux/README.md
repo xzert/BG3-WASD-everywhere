@@ -67,6 +67,13 @@ an error and stays inactive.
   character. Character highlights and sound occlusion call it too and keep the game's answer. The
   active character comes from `gui::GameUI::OnSelectedCharacterChanged`. Both names come from the
   macOS build, which keeps them.
+- `PreventClickingCameraOccluders` (off by default, as on Windows): in Character mode the picking
+  ray of `ecl::PickingHelper::GameObjectPick` starts the camera's zoom distance further along, so
+  what stands between the camera and the character can't be clicked. A steep or distant camera
+  (zoom × pitch ≥ 300) is an exception, as on Windows. The mod replaces the ray's call of
+  `phx::PhysXScene::RaycastAll` with a stub that moves its start; the camera
+  (`ecl::GameCameraBehavior`) comes from `GetCameraPitchDegrees`, which the camera update calls
+  every frame.
 
 ## Not ported yet
 
@@ -74,7 +81,7 @@ an error and stays inactive.
   - mouselook doesn't pause by itself for the loot window and photo mode;
   - the crosshair icon for `centered`.
 - Hotkeys still work while menus are open. They are ignored only while you type into a text field.
-- No interact-move blocker, and camera occluders stay clickable (`PreventClickingCameraOccluders`).
+- No interact-move blocker.
 
 ## Known issues
 

@@ -65,6 +65,12 @@ RotatePlusLeftclickMovesForward = true
 # While you rotate the camera, holding the left mouse button moves your character forward.
 # [true, false]
 
+PreventClickingCameraOccluders = false
+# If true, the cursor ignores objects that are closer to the camera than the active character, in
+# Character movement mode. This prevents accidentally clicking on your trailing companions. If you
+# zoom out a lot or have a steep camera angle, the mod makes an exception. Vanilla is false.
+# [true, false]
+
 PreventClickingActiveCharacter = true
 # If true, the cursor ignores the active character, in Character movement mode. This prevents
 # accidentally opening the context menu on them, or clicking your character instead of the
@@ -92,7 +98,7 @@ IsCharacterMovementDefault = true
 
 
 # Not available on macOS yet, and ignored if present: SwitchToWalkingAfterCombat,
-# AutoToggleMovementMode, PreventClickingCameraOccluders, BlockInteractMove.
+# AutoToggleMovementMode, BlockInteractMove.
 
 
 # List of all available keys for mod hotkeys:

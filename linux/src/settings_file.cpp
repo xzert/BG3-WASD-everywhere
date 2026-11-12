@@ -131,6 +131,8 @@ bool ParseSettingsFile(const std::string& path, Settings& s)
             s.auto_toggle_movement_mode = ParseBool(value, s.auto_toggle_movement_mode);
         } else if (key == "SwitchToWalkingAfterCombat") {
             s.walk_after_combat = ParseBool(value, s.walk_after_combat);
+        } else if (key == "PreventClickingCameraOccluders") {
+            s.prevent_clicking_camera_occluders = ParseBool(value, s.prevent_clicking_camera_occluders);
         } else if (key == "PreventClickingActiveCharacter") {
             s.prevent_clicking_active_character = ParseBool(value, s.prevent_clicking_active_character);
         } else if (key == "RotatePlusLeftclickMovesForward") {

@@ -255,6 +255,33 @@ bool FindUnclickableCharacterAddresses(const uint8_t* text, size_t size, uintptr
     return true;
 }
 
+bool FindOccluderAddresses(const uint8_t* text, size_t size, uintptr_t text_address, OccluderAddresses& out,
+    std::string& error)
+{
+    // GetCameraPitchDegrees: `cmp byte [rdi+0x1E4], 0 ; je ; test sil, sil ; je`, then the camera mode
+    // (`cmp dword [rdi+0x13C], 2`) and the flags at +0xA8.
+    const auto pitch = FindPattern(text, size,
+        "80 BF E4 01 00 00 00 74 ?? 40 84 F6 0F 84 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 83 BF 3C 01 00 00 02 8A 8F A8 "
+        "00 00 00");
+    // The picking ray's last stack argument (mask 0x210080), then the 11 bytes the hook replaces.
+    const auto ray = FindPattern(text, size, "C7 04 24 80 00 21 00 48 8B 8C 24 B0 00 00 00 FF 50 48");
+    if (pitch.size() != 1 || ray.size() != 1) {
+        error = "GetCameraPitchDegrees matched " + std::to_string(pitch.size()) + " times, the picking ray " +
+            std::to_string(ray.size()) + ", expected 1 each";
+        return false;
+    }
+    // The same call also gets `mov r9d, 0x4CA20` (the other mask) shortly before.
+    static constexpr uint8_t kMask[] = { 0x41, 0xB9, 0x20, 0xCA, 0x04, 0x00 };
+    const uint8_t* before = text + (ray[0] >= 0x100 ? ray[0] - 0x100 : 0);
+    if (std::search(before, text + ray[0], std::begin(kMask), std::end(kMask)) == text + ray[0]) {
+        error = "the picking ray call has no mov r9d, 0x4CA20 before it";
+        return false;
+    }
+    out.camera_pitch = text_address + pitch[0];
+    out.raycast_site = text_address + ray[0] + 7;
+    return true;
+}
+
 bool FindCharacterCameraAddresses(const uint8_t* text, size_t size, uintptr_t text_address,
     uintptr_t is_in_controller_mode, CharacterCameraAddresses& out, std::string& error)
 {

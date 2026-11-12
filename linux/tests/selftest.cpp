@@ -162,6 +162,15 @@ int main(int argc, char** argv)
         std::printf("\nOnSelectedCharacterChanged %#lx\n", Hex(unclickable.selected_character_changed));
     }
 
+    wasd::OccluderAddresses occluders;
+    if (!wasd::FindOccluderAddresses(text.data, text.size, text.address, occluders, error)) {
+        std::printf("FAILED (camera occluders): %s\n", error.c_str());
+        ++failures;
+    } else {
+        std::printf("GetCameraPitchDegrees %#lx, picking ray %#lx\n", Hex(occluders.camera_pitch),
+            Hex(occluders.raycast_site));
+    }
+
     wasd::TelemetryCalls telemetry;
     if (!wasd::FindTelemetryCalls(text.data, text.size, text.address, rodata.data, rodata.size, rodata.address,
             telemetry, error)) {

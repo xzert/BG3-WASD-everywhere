@@ -32,6 +32,9 @@ enum Index {
     PickingDoPick,
     PickingUpdate,
     PickingForEachSelectableTarget,
+    CalcCamTargetDest,         // ecl::CameraSystem::CalcCamTargetDest(EntityView<GameCameraBehavior, ...> const&): x1 points at the GameCameraBehavior*
+    PhysXSceneVtable,          // vtable for phx::PhysXScene
+    RaycastAll,                // phx::PhysXScene::RaycastAll(Vector3f const& start, Vector3f const& end, ...) const
     Count
 };
 
@@ -60,6 +63,9 @@ inline constexpr const char* kNames[Count] = {
     "__ZN3ecl13PickingHelper6DoPickEv",
     "__ZN3ecl13PickingHelper6UpdateERKN2ls8GameTimeE",
     "__ZN2ls8FunctionIFbNS_10PhysicsHitEEE18FunctorMethodsHeapIZN3ecl13PickingHelper23ForEachSelectableTargetERKNS_8GameTimeEPKNS5_9CharacterEbbNS0_IFvRN3ecs9EntityRefEEEEE3$_5E4CallERNS3_7StorageES1_",
+    "__ZN3ecl12CameraSystem17CalcCamTargetDestERKN3ecs8_private10EntityViewIJN2ls8TypeListIJNS_18GameCameraBehaviorEKNS_17EocCameraBehaviorEKNS4_18TransformComponentEEEENS5_IJEEEEEE",
+    "__ZTVN3phx10PhysXSceneE",
+    "__ZNK3phx10PhysXScene10RaycastAllERK8Vector3fS3_RN2ls13PhysicsHitAllENS4_12EPhysicsTypeEjjNS4_15EPhysicsContextEjjNS4_8OptionalIRNS4_26PhysicsSceneScopedReadLockEEE",
 };
 
 // A vtable symbol points at the offset-to-top entry; virtual function slots start 16 bytes later.

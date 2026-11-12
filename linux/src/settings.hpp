@@ -26,6 +26,7 @@ struct Settings {
     bool rotate_plus_lmb_is_forward = true;
     // macOS only so far.
     bool prevent_clicking_active_character = true;
+    bool prevent_clicking_camera_occluders = false;
 };
 
 // Reads `path`; keys that are missing keep their defaults. Returns false if the file can't be read.

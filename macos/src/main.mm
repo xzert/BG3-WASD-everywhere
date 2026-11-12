@@ -41,6 +41,7 @@
 #include <cerrno>
 #include <chrono>
 #include <climits>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -72,6 +73,10 @@ extern void* g_camera_input_original;
 void GameUIUpdateProbe();
 extern void* g_game_ui_update_original;
 extern void* g_game_ui;
+void CameraTargetProbe();
+extern void* g_camera_target_original;
+void RaycastProbe();
+extern void* g_raycast_original;
 }
 
 namespace {
@@ -107,6 +112,8 @@ std::atomic<bool> g_rotate_plus_left_click{ true };
 bool g_rotate_input_is_left_click = false;  // CameraToggleMouseRotate includes the left button
 std::atomic<bool> g_mode_toggles_mouselook{ false };  // TogglingMovementModeAlsoTogglesCameraRotation
 std::atomic<bool> g_prevent_clicking_character{ true };  // PreventClickingActiveCharacter
+std::atomic<bool> g_prevent_clicking_occluders{ false };  // PreventClickingCameraOccluders
+std::atomic<const uint8_t*> g_camera_behavior{ nullptr };  // ecl::GameCameraBehavior, from CalcCamTargetDest
 
 // Main thread only, like sendEvent:.
 bool g_autoforward = false;
@@ -214,6 +221,7 @@ void LoadSettings(bool first)
     g_rotate_plus_left_click = settings.rotate_plus_lmb_is_forward;
     g_mode_toggles_mouselook = settings.toggling_movement_mode_also_toggles_camera_rotation;
     g_prevent_clicking_character = settings.prevent_clicking_active_character;
+    g_prevent_clicking_occluders = settings.prevent_clicking_camera_occluders;
     if (first) {
         g_mode_toggled = settings.is_character_movement_default;
         g_walking_toggled = settings.is_walking_default;
@@ -1306,6 +1314,42 @@ void InstallUnclickableCharacter(const macho::Image& image, const uintptr_t* add
         g_prevent_clicking_character ? "on" : "off in the config");
 }
 
+// PreventClickingCameraOccluders, like PreventClickingCameraOccludersCavehook on Windows: in Character
+// mode the cursor ignores what stands between the camera and the character, such as trailing
+// companions. The picking ray of ecl::PickingHelper::GameObjectPick then starts the camera's zoom
+// distance further along, unless the camera looks down steeply or from far away. Windows hooks the
+// vtable's 0x40 slot: MSVC has one destructor slot where the Itanium ABI has two, so here it is 0x48,
+// RaycastAll, not RaycastClosest. The camera
+// (ecl::GameCameraBehavior, the Windows mod's Camera struct) comes from CalcCamTargetDest.
+void InstallOccluderHooks(const uintptr_t* addresses)
+{
+    const uintptr_t target = addresses[symbols::CalcCamTargetDest];
+    const uintptr_t vtable = addresses[symbols::PhysXSceneVtable];
+    const uintptr_t raycast = addresses[symbols::RaycastAll];
+    if (!target || !vtable || !raycast || !g_picking_code[0].start) {
+        LOG_WARN("Camera occluders stay clickable: functions not found");
+        return;
+    }
+    uintptr_t slot = 0;
+    for (size_t i = 0; i < 32 && !slot; ++i) {
+        const uintptr_t candidate = vtable + symbols::kVtableAddressPoint + 8 * i;
+        if (*reinterpret_cast<const uintptr_t*>(candidate) == raycast) {
+            slot = candidate;
+        }
+    }
+    if (!slot || !InlineHook("CalcCamTargetDest", target, reinterpret_cast<uintptr_t>(&CameraTargetProbe),
+                      &g_camera_target_original)) {
+        LOG_WARN("Camera occluders stay clickable: RaycastAll isn't in the PhysXScene vtable, or no camera hook");
+        return;
+    }
+    g_raycast_original = reinterpret_cast<void*>(raycast);
+    if (!WritePointer(slot, reinterpret_cast<uintptr_t>(&RaycastProbe))) {
+        return;
+    }
+    LOG_INFO("Camera occluders: PhysXScene::RaycastAll hooked (vtable slot %#lx), %s", (unsigned long)(slot - vtable),
+        g_prevent_clicking_occluders ? "on" : "off in the config");
+}
+
 void OnModeChanged(bool was_character, id application, NSEvent* source)
 {
     const bool character = IsCharacterMode();
@@ -1647,6 +1691,7 @@ void Run()
     InstallRotationHooks(addresses);
     InstallMouselook(addresses);
     InstallUnclickableCharacter(image, addresses);
+    InstallOccluderHooks(addresses);
 
     if (SwizzleSendEvent()) {
         LOG_INFO("Hotkeys enabled (-[BG3Application sendEvent:])");
@@ -1676,6 +1721,63 @@ __attribute__((constructor)) void OnLibraryLoad()
 }
 
 }  // namespace
+
+// Called by the stub in stubs.S with the arguments of ecl::CameraSystem::CalcCamTargetDest: the
+// EntityView starts with the GameCameraBehavior pointer.
+extern "C" void ObserveCameraTarget(void*, void* const* view)
+{
+    if (!view || !view[0]) {
+        return;
+    }
+    // It runs for more than one camera, and some of them have a NaN or zero zoom and pitch. Like
+    // State::IsCameraValid on Windows, keep the last camera with sane values.
+    const auto* camera = static_cast<const uint8_t*>(view[0]);
+    float zoom, pitch;
+    std::memcpy(&zoom, camera + 0x54, sizeof zoom);
+    std::memcpy(&pitch, camera + 0x164, sizeof pitch);
+    if (std::isfinite(zoom) && std::isfinite(pitch) && zoom > 0.01f) {
+        g_camera_behavior.store(camera, std::memory_order_relaxed);
+    }
+}
+
+// Called by RaycastProbe for every PhysXScene::RaycastAll, on any thread. Returns the start to
+// use: a moved copy for GameObjectPick's picking ray, otherwise the game's own.
+extern "C" const float* AdjustRayStart(const float* start, const float* end, uintptr_t caller)
+{
+    const CodeRange& pick = g_picking_code[0];  // GameObjectPick::ExecuteWTKernel
+    if (caller < pick.start || caller >= pick.end || !g_prevent_clicking_occluders || !IsCharacterMode() ||
+        IsControllerMode()) {
+        return start;
+    }
+    const uint8_t* camera = g_camera_behavior.load(std::memory_order_relaxed);
+    float zoom = 0.0f, pitch = 0.0f;
+    if (camera) {
+        std::memcpy(&zoom, camera + 0x54, sizeof zoom);    // Windows Camera::currentZoomA
+        std::memcpy(&pitch, camera + 0x164, sizeof pitch);  // Windows Camera::currentPitch_164
+    }
+    // The Windows mod's exception: close up, a steep angle is needed before objects get skipped.
+    constexpr float kThreshold = 300.0f;
+    const float d[3] = { end[0] - start[0], end[1] - start[1], end[2] - start[2] };
+    const float length = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    const bool move = zoom > 0.0f && zoom * pitch < kThreshold && length > zoom;
+
+    // The decision and the camera values, logged when the decision changes.
+    static std::atomic<int> last_state{ -1 };
+    const int state = !camera ? 0 : move ? 1 : 2;
+    if (last_state.exchange(state) != state) {
+        LOG_INFO("Picking ray %s (zoom %.1f, pitch %.1f, ray %.1f)",
+            !camera ? "kept: no camera yet" : move ? "moved past camera occluders" : "kept: camera exception",
+            zoom, pitch, length);
+    }
+    if (!move) {
+        return start;
+    }
+    thread_local float moved[3];
+    for (int i = 0; i < 3; ++i) {
+        moved[i] = start[i] + d[i] / length * zoom;
+    }
+    return moved;
+}
 
 // Called by the stub in stubs.S with the arguments of ecl::CameraSystem::OnInputEvent.
 extern "C" void ObserveCameraInput(void* self, const void* entity, const uint8_t* event)

@@ -83,12 +83,13 @@ Notes on the Linux column:
 - ⁴ Combat is detected from the game's combat start and end events. If you load a save in the
   middle of a fight, the mod notices only at the next start or end, so press `ToggleMovementMode`
   yourself.
-- ⁵ The active character only (`PreventClickingActiveCharacter`); camera occluders not yet.
+- ⁵ The active character (`PreventClickingActiveCharacter`) and camera occluders
+  (`PreventClickingCameraOccluders`).
 
 Notes on the macOS column:
 
 - ¹ ² ³ As on Linux. Mouselook's pause in dialogs isn't checked in game yet.
-- ⁵ As on Linux.
+- ⁵ The active character and camera occluders (`PreventClickingCameraOccluders`).
 - The config has only the settings the port supports so far. Key names are the same as on Linux;
   on a Mac keyboard, `alt` is Option and `gui` is Command.
 

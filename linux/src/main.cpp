@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <climits>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -18,6 +19,9 @@
 #include "settings.hpp"
 #include "signatures.hpp"
 #include "state.hpp"
+
+// The picking ray hook, written in assembly at the end of this file.
+extern "C" __attribute__((visibility("hidden"))) void wasd_RaycastSiteStub();
 
 namespace wasd {
 namespace {
@@ -88,6 +92,7 @@ struct RegisterPair {
 using ExecuteCameraCommandFn = RegisterPair (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 
 void InstallUnclickableCharacter(const mem::MainExecutable& exe);
+void InstallCameraOccluders(const mem::MainExecutable& exe);
 
 constexpr uint32_t kCameraBackward = 99;
 constexpr uint32_t kCameraRight = 102;
@@ -338,6 +343,7 @@ bool Install()
     camera::InstallCharacterModeCamera(exe, game.is_in_controller_mode);
     InstallGameEvents(exe);
     InstallUnclickableCharacter(exe);
+    InstallCameraOccluders(exe);
     return true;
 }
 
@@ -410,6 +416,66 @@ void InstallUnclickableCharacter(const mem::MainExecutable& exe)
         file_address(addresses.selected_character_changed));
 }
 
+// Camera occluders, like PreventClickingCameraOccludersCavehook on Windows: in Character mode the
+// cursor ignores what stands between the camera and the character, such as trailing companions. The
+// picking ray of GameObjectPick starts the camera's zoom distance further along, unless the camera
+// looks down steeply or from far away. wasd_RaycastSiteStub replaces the ray's RaycastAll call and asks
+// wasd_AdjustRayStart for the start; the camera comes from GetCameraPitchDegrees.
+using CameraPitchFn = float (*)(const uint8_t* camera, bool a, bool b);
+CameraPitchFn g_camera_pitch = nullptr;
+
+float CameraPitchHook(const uint8_t* camera, bool a, bool b)
+{
+    // It runs for more than one camera, and some may have a NaN or zero zoom and pitch. Like
+    // State::IsCameraValid on Windows, keep the last camera with sane values.
+    if (camera) {
+        float zoom, pitch;
+        std::memcpy(&zoom, camera + 0x54, sizeof zoom);
+        std::memcpy(&pitch, camera + 0x164, sizeof pitch);
+        if (std::isfinite(zoom) && std::isfinite(pitch) && zoom > 0.01f) {
+            GetState().camera.store(camera, std::memory_order_relaxed);
+        }
+    }
+    return g_camera_pitch(camera, a, b);
+}
+
+void InstallCameraOccluders(const mem::MainExecutable& exe)
+{
+    auto file_address = [&](uintptr_t address) { return static_cast<unsigned long>(address - exe.load_bias); };
+    OccluderAddresses addresses;
+    std::string error;
+    if (!FindOccluderAddresses(reinterpret_cast<const uint8_t*>(exe.code.start), exe.code.size, exe.code.start,
+            addresses, error)) {
+        LOG_WARN("Camera occluders stay clickable: %s", error.c_str());
+        return;
+    }
+    // cmp byte [rdi+0x1E4], 0: one whole instruction, nothing position-dependent.
+    static constexpr uint8_t kPitchEntry[] = { 0x80, 0xBF, 0xE4, 0x01, 0x00, 0x00, 0x00 };
+    if (!mem::HookEntry(addresses.camera_pitch, kPitchEntry, sizeof kPitchEntry,
+            reinterpret_cast<const void*>(&CameraPitchHook), reinterpret_cast<void**>(&g_camera_pitch))) {
+        LOG_WARN("Camera occluders stay clickable: could not hook GetCameraPitchDegrees");
+        return;
+    }
+    // `mov rcx, [rsp+0xB0] ; call [rax+0x48]` becomes `call stub ; nop6`. This runs before the game
+    // starts, so no thread can be inside these bytes.
+    void* stub = mem::MakeJumpStub(addresses.raycast_site, reinterpret_cast<const void*>(&wasd_RaycastSiteStub));
+    if (!stub) {
+        LOG_WARN("Camera occluders stay clickable: no jump stub");
+        return;
+    }
+    uint8_t code[11] = { 0xE8, 0, 0, 0, 0, 0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00 };
+    const int32_t rel = static_cast<int32_t>(reinterpret_cast<intptr_t>(stub) -
+                                             static_cast<intptr_t>(addresses.raycast_site + 5));
+    std::memcpy(code + 1, &rel, sizeof rel);
+    if (!mem::WriteCode(addresses.raycast_site, code, sizeof code)) {
+        LOG_WARN("Camera occluders stay clickable: could not patch the picking ray");
+        return;
+    }
+    LOG_INFO("Camera occluders: GetCameraPitchDegrees %#lx, picking ray %#lx, %s",
+        file_address(addresses.camera_pitch), file_address(addresses.raycast_site),
+        GetState().prevent_clicking_camera_occluders ? "on" : "off in the config");
+}
+
 // Runs in every process that inherits LD_PRELOAD (Steam's launch wrappers, the crash handler, ...),
 // so it does nothing unless this is the game itself.
 __attribute__((constructor)) void OnLibraryLoad()
@@ -476,3 +542,79 @@ void State::SetMovementModeHeld(bool value)
 }
 
 }  // namespace wasd
+
+// Called by wasd_RaycastSiteStub on a picking worker thread with RaycastAll's start and end. Returns
+// the start to use: a moved copy, or the game's own.
+extern "C" __attribute__((visibility("hidden"), used, noinline, noipa)) const float* wasd_AdjustRayStart(
+    const float* start, const float* end)
+{
+    using namespace wasd;
+    const State& state = GetState();
+    if (!state.prevent_clicking_camera_occluders || !state.IsCharacterMovementMode() || state.IsInControllerMode()) {
+        return start;
+    }
+    const uint8_t* camera = state.camera.load(std::memory_order_relaxed);
+    float zoom = 0.0f, pitch = 0.0f;
+    if (camera) {
+        std::memcpy(&zoom, camera + 0x54, sizeof zoom);    // Windows Camera::currentZoomA
+        std::memcpy(&pitch, camera + 0x164, sizeof pitch);  // Windows Camera::currentPitch_164
+    }
+    // The Windows mod's exception: close up, a steep angle is needed before objects get skipped.
+    constexpr float kThreshold = 300.0f;
+    const float d[3] = { end[0] - start[0], end[1] - start[1], end[2] - start[2] };
+    const float length = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    const bool move = zoom > 0.0f && zoom * pitch < kThreshold && length > zoom;
+
+    // The decision and the camera values, logged when the decision changes.
+    static std::atomic<int> last_state{ -1 };
+    const int decision = !camera ? 0 : move ? 1 : 2;
+    if (last_state.exchange(decision) != decision) {
+        LOG_INFO("Picking ray %s (zoom %.1f, pitch %.1f, ray %.1f)",
+            !camera ? "kept: no camera yet" : move ? "moved past camera occluders" : "kept: camera exception",
+            zoom, pitch, length);
+    }
+    if (!move) {
+        return start;
+    }
+    thread_local float moved[3];
+    for (int i = 0; i < 3; ++i) {
+        moved[i] = start[i] + d[i] / length * zoom;
+    }
+    return moved;
+}
+
+// Replaces `mov rcx, [rsp+0xB0] ; call [rax+0x48]` in GameObjectPick, entered with `call`: does the
+// mov (0xB8 past the return address), swaps rsi for wasd_AdjustRayStart's answer and jumps to
+// RaycastAll, which returns to the game. The argument registers are kept; seven pushes after the
+// return address align the stack for the call.
+asm(R"(
+    .pushsection .text
+    .p2align 4
+    .globl wasd_RaycastSiteStub
+    .hidden wasd_RaycastSiteStub
+    .type wasd_RaycastSiteStub, @function
+wasd_RaycastSiteStub:
+    movq 0xb8(%rsp), %rcx
+    pushq %rax
+    pushq %rdi
+    pushq %rsi
+    pushq %rdx
+    pushq %rcx
+    pushq %r8
+    pushq %r9
+    movq %rsi, %rdi
+    movq %rdx, %rsi
+    call wasd_AdjustRayStart
+    movq %rax, %r11
+    popq %r9
+    popq %r8
+    popq %rcx
+    popq %rdx
+    popq %rsi
+    popq %rdi
+    popq %rax
+    movq %r11, %rsi
+    jmpq *0x48(%rax)
+    .size wasd_RaycastSiteStub, .-wasd_RaycastSiteStub
+    .popsection
+)");

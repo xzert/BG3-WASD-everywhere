@@ -95,6 +95,12 @@ IsCharacterMovementDefault = true
 # [true, false]
 
 
+PreventClickingCameraOccluders = false
+# If true, the cursor ignores objects that are closer to the camera than the active character, in
+# Character movement mode. This prevents accidentally clicking on your trailing companions. If you
+# zoom out a lot or have a steep camera angle, the mod makes an exception. Vanilla is false.
+# [true, false]
+
 PreventClickingActiveCharacter = true
 # If true, the cursor ignores the active character, in Character movement mode. This prevents
 # accidentally opening the context menu on them, or clicking your character instead of the
@@ -102,8 +108,7 @@ PreventClickingActiveCharacter = true
 # [true, false]
 
 
-# Not available on Linux yet, and ignored if present:
-# PreventClickingCameraOccluders, BlockInteractMove.
+# Not available on Linux yet, and ignored if present: BlockInteractMove.
 
 
 # List of all available keys for mod hotkeys:

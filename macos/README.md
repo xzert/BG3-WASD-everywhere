@@ -57,6 +57,12 @@ An early port for the native macOS game on Apple Silicon. Supported game version
   Windows. The game's picking skips objects that `ls::IsFading` reports as fading out; the library
   makes it report so for the active character when `ecl::PickingHelper` asks, and only then. The
   active character comes from `gui::GameUI::OnSelectedCharacterChanged`.
+- `PreventClickingCameraOccluders` (off by default, as on Windows): in Character mode the picking ray
+  of `ecl::PickingHelper::GameObjectPick` starts the camera's zoom distance further along, so what
+  stands between the camera and the character can't be clicked. As on Windows, a steep or distant
+  camera (zoom × pitch ≥ 300) is an exception. The library replaces `phx::PhysXScene::RaycastAll`
+  in its vtable and changes only rays cast from `GameObjectPick`; the camera
+  (`ecl::GameCameraBehavior`) comes from `ecl::CameraSystem::CalcCamTargetDest`.
 - The movement keys are bound in `inputconfig_p1.json` of every player profile in
   `~/Documents/Larian Studios/Baldur's Gate 3/PlayerProfiles/`. It uses the same patcher as the Linux
   port, and keeps the original as `inputconfig_p1.json.bg3-wasd-everywhere.bak` before changing it.
