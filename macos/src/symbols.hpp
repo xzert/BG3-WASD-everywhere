@@ -41,6 +41,7 @@ enum Index {
     IsEdgePanningAllowed,      // ecl::CameraSystem::IsEdgePanningAllowed(EntityView<EocCameraBehavior, GameCameraBehavior, ...> const&) const
     MoveToOnInputEvent,        // ecl::CharacterTask_MoveTo::OnInputEvent(ls::InputEvent const&)
     InputControllerOnInputEvent,  // ecl::InputController::OnInputEvent(ls::InputEvent const&)
+    TriggerHitTest,            // ls::trigger::HitTest(ls::trigger::AreaComponent const&, ls::Transform const&, Vector3f const&)
     Count
 };
 
@@ -106,6 +107,7 @@ inline constexpr const char* kNames[Count] = {
      "BehaviorEKNS_18GameCameraBehaviorEEEENS5_IJKNS_6camera23PlatformTargetComponentEEEEEEE"),
     "__ZN3ecl20CharacterTask_MoveTo12OnInputEventERKN2ls10InputEventE",
     "__ZN3ecl15InputController12OnInputEventERKN2ls10InputEventE",
+    "__ZN2ls7trigger7HitTestERKNS0_13AreaComponentERKNS_9TransformERK8Vector3f",
 };
 
 // A vtable symbol points at the offset-to-top entry; virtual function slots start 16 bytes later.

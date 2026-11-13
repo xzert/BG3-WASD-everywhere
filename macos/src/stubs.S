@@ -166,6 +166,20 @@ _RotationSpeedStub:
     ldr x16, [x16, _g_rotation_speed_return@PAGEOFF]
     br x16
 
+    // UpdateGameCameraBehavior, the chase camera's target test (PreventLosingChaseCamTarget):
+    // `mov x24, x21 ; mov x2, x22 ; mov x22, x25 ; bl ls::trigger::HitTest`. ChaseTargetHitTest
+    // returns the result to use in w0; like the pitch update, it is a call where the game made one.
+    .p2align 2
+    .private_extern _ChaseTargetStub
+_ChaseTargetStub:
+    mov x24, x21
+    mov x2, x22
+    mov x22, x25
+    bl _ChaseTargetHitTest
+    adrp x16, _g_chase_target_return@PAGE
+    ldr x16, [x16, _g_chase_target_return@PAGEOFF]
+    br x16
+
     // Where the stubs continue: the original functions.
     .data
     .p2align 3
@@ -193,6 +207,9 @@ _g_zoom_speed_return:
     .quad 0
     .private_extern _g_rotation_speed_return
 _g_rotation_speed_return:
+    .quad 0
+    .private_extern _g_chase_target_return
+_g_chase_target_return:
     .quad 0
     // The speed multipliers, set before each camera command by ObserveCameraInput.
     .private_extern _g_zoom_speed_mult

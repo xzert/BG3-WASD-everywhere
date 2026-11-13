@@ -44,4 +44,10 @@ long FindZoomSpeedStore(const uint32_t* code, size_t count, uint64_t pc, uint64_
 // the fmov, or -1.
 long FindRotationSpeedStore(const uint32_t* code, size_t count, uint64_t pc);
 
+// In UpdateGameCameraBehavior, the chase camera's test whether a point is inside its target's
+// bounds, inverted right after (PreventLosingChaseCamTargetHook on Windows):
+// `mov x24, x21 ; mov x2, x22 ; mov x22, x25 ; bl ls::trigger::HitTest ; eor wN, w0, #1`. Returns the
+// index of the first mov, or -1.
+long FindChaseTargetTest(const uint32_t* code, size_t count, uint64_t pc, uint64_t hit_test);
+
 }  // namespace wasd::patterns

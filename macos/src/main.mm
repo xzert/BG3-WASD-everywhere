@@ -83,6 +83,8 @@ extern void* g_raycast_original;
 void PitchUpdateStub();
 void ZoomSpeedStub();
 void RotationSpeedStub();
+void ChaseTargetStub();
+extern uint64_t g_chase_target_return;
 extern uint64_t g_pitch_update_return;
 extern uint64_t g_zoom_speed_return;
 extern uint64_t g_rotation_speed_return;
@@ -1511,13 +1513,18 @@ void OnModeChanged(bool was_character, id application, NSEvent* source)
 //   those two places in the code when the mode changes; on macOS, rewriting code takes away its
 //   execute permission for a moment, which another thread could run into, so the hooks stay in
 //   place and read a flag.
-// Not ported: PreventLosingChaseCamTarget, the Windows mod's fix of a rare chase camera symptom.
-// Its target, ls::trigger::HitTest, starts with a branch and can't take an inline hook.
+// - The chase camera keeps its target: UpdateGameCameraBehavior's test whether a point is inside
+//   the target's bounds says no, as PreventLosingChaseCamTargetHook does on Windows. That works
+//   around a rare symptom whose cause the Windows author didn't find. ls::trigger::HitTest starts
+//   with a branch and can't take an inline hook, and many systems call it, so the call site is
+//   replaced instead (ChaseTargetStub, as for the camera tweaks).
 
 enum class GameEvent { CombatStart, CombatEnd, FtbStart, FtbEnd };
 int64_t g_last_combat_change_ms = 0;  // main thread
 bool g_edge_panning_hooked = false;
 bool g_interact_move_hooked = false;
+using HitTestFn = bool (*)(const void* area, const void* transform, const void* point);
+HitTestFn g_hit_test = nullptr;
 
 // Logs the changes, as the Linux port does when it patches. Main thread.
 void LogCharacterModeCamera()
@@ -1661,7 +1668,7 @@ uint64_t InputControllerInputHook(void* controller, const uint8_t* event)
     return result;
 }
 
-void InstallCombatAndCharacterCamera(const uintptr_t* addresses)
+void InstallCombatAndCharacterCamera(const macho::Image& image, const uintptr_t* addresses, intptr_t slide)
 {
     const uintptr_t events = addresses[symbols::FillAllEventsData];
     if (events && InlineHook("FillAllEventsData", events, reinterpret_cast<uintptr_t>(&FillAllEventsDataHook),
@@ -1675,6 +1682,19 @@ void InstallCombatAndCharacterCamera(const uintptr_t* addresses)
         reinterpret_cast<uintptr_t>(&EdgePanningHook), reinterpret_cast<void**>(&g_is_edge_panning_allowed));
     if (!g_edge_panning_hooked) {
         LOG_WARN("Edge panning unchanged in Character mode: IsEdgePanningAllowed not hooked");
+    }
+    const uintptr_t update = addresses[symbols::UpdateGameCameraBehavior];
+    const uintptr_t hit_test = addresses[symbols::TriggerHitTest];
+    size_t count = 0;
+    const uint32_t* code = hit_test ? FunctionCode(image, update, count) : nullptr;
+    const long chase = code ? patterns::FindChaseTargetTest(code, count, update, hit_test) : -1;
+    const uintptr_t chase_site = update + 4 * uintptr_t(chase);
+    g_hit_test = reinterpret_cast<HitTestFn>(hit_test);
+    g_chase_target_return = chase_site + 16;
+    if (chase >= 0 && JumpToStub(chase_site, &ChaseTargetStub)) {
+        LOG_INFO("Chase camera target test %#lx", (unsigned long)(chase_site - slide));
+    } else {
+        LOG_WARN("Chase camera unchanged in Character mode: its target test wasn't found");
     }
     const uintptr_t move_to = addresses[symbols::MoveToOnInputEvent];
     const uintptr_t controller = addresses[symbols::InputControllerOnInputEvent];
@@ -2027,7 +2047,7 @@ void Run()
     // The tweaks first: with the pitch update hooked, the occluders take their camera from it.
     InstallCameraTweaks(image, addresses, slide);
     InstallOccluderHooks(addresses);
-    InstallCombatAndCharacterCamera(addresses);
+    InstallCombatAndCharacterCamera(image, addresses, slide);
 
     if (SwizzleSendEvent()) {
         LOG_INFO("Hotkeys enabled (-[BG3Application sendEvent:])");
@@ -2174,6 +2194,16 @@ extern "C" float PitchUpdateHook(uint8_t* camera)
     const float pitch = g_camera_pitch(camera, false, false);
     const bool rotating = camera && (camera[0xA9] & 0x01);
     return camera_tweaks::OnUpdatePitch(camera, pitch, rotating, IsControllerMode());
+}
+
+// Called by ChaseTargetStub in UpdateGameCameraBehavior, on the game thread, with the arguments of
+// ls::trigger::HitTest. "Not inside" in Character mode, which the game inverts right after.
+extern "C" bool ChaseTargetHitTest(const void* area, const void* transform, const void* point)
+{
+    if (CharacterModeCameraActive()) {
+        return false;
+    }
+    return g_hit_test(area, transform, point);
 }
 
 // Called by the stub in stubs.S with the arguments of ecl::CameraSystem::OnInputEvent.

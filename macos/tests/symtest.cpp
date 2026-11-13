@@ -333,6 +333,16 @@ bool CheckSlice(const std::vector<uint8_t>& file, uint32_t cputype, const char* 
             std::printf("  Camera tweaks: speed stores NOT FOUND (zoom %ld, rotation %ld)\n", zoom, rotation);
         }
         ok = ok && pitch_found && zoom >= 0 && rotation >= 0;
+
+        // The chase camera's target test, also a 16-byte window.
+        const long chase = patterns::FindChaseTargetTest(update_code.data(), update_code.size(), update,
+            addresses[symbols::TriggerHitTest]);
+        if (chase >= 0) {
+            std::printf("  Chase camera target test %#" PRIx64 "\n", update + 4 * uint64_t(chase));
+        } else {
+            std::printf("  Chase camera target test NOT FOUND\n");
+        }
+        ok = ok && chase >= 0;
     }
     return ok;
 }

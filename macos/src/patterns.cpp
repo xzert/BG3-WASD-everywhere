@@ -49,6 +49,10 @@ constexpr uint32_t kZoomApply = 0x1E200820;       // fmul s0, s1, s0
 constexpr uint32_t kStoreZoomSpeed = 0xBD00A6C0;  // str s0, [x22, #0xA4]
 constexpr uint32_t kMoveW8ToS2 = 0x1E270102;      // fmov s2, w8
 constexpr uint32_t kStoreAngleSpeed = 0xBD009EC0; // str s0, [x22, #0x9C]
+constexpr uint32_t kMovX24X21 = 0xAA1503F8;       // mov x24, x21
+constexpr uint32_t kMovX2X22 = 0xAA1603E2;        // mov x2, x22
+constexpr uint32_t kMovX22X25 = 0xAA1903F6;       // mov x22, x25
+constexpr uint32_t kEorW0One = 0x52000000;        // eor wN, w0, #1, with N in the low 5 bits
 constexpr size_t kWindow = 16;                    // the bytes the jump replaces
 
 // Only the first instruction of a replaced window may be a branch target.
@@ -163,6 +167,22 @@ long FindRotationSpeedStore(const uint32_t* code, size_t count, uint64_t pc)
         if (code[i] == kMoveW8ToS2 && code[i + 1] == kZoomScale && code[i + 2] == kZoomApply &&
             code[i + 3] == kStoreAngleSpeed) {
             found = long(i);
+            ++matches;
+        }
+    }
+    return matches == 1 && Replaceable(code, count, pc, size_t(found)) ? found : -1;
+}
+
+long FindChaseTargetTest(const uint32_t* code, size_t count, uint64_t pc, uint64_t hit_test)
+{
+    long found = -1;
+    int matches = 0;
+    for (size_t i = 3; i + 1 < count; ++i) {
+        uint64_t target = 0;
+        if ((code[i] & 0xFC000000) == 0x94000000 && arm64::DecodeBranch(code[i], pc + 4 * i, target) &&
+            target == hit_test && (code[i + 1] & 0xFFFFFFE0) == kEorW0One && code[i - 3] == kMovX24X21 &&
+            code[i - 2] == kMovX2X22 && code[i - 1] == kMovX22X25) {
+            found = long(i - 3);
             ++matches;
         }
     }

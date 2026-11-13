@@ -73,7 +73,7 @@ Both ports support game version **4.1.1.7631656** (Hotfix #36).
 | Automatic Camera mode in combat | ✅ | ✅ ⁴ | ✅ ⁴ |
 | `ToggleCameraRotation` (mouselook without holding a button) | ✅ | ✅ | ✅ |
 | Rotation turns off in menus, dialogs, loot and photo mode | ✅ | ✅ ² | ✅ ² |
-| No edge panning in Character mode | ✅ | ✅ | ✅ ⁸ |
+| No edge panning in Character mode | ✅ | ✅ | ✅ |
 | Rotate + left click moves forward | ✅ | ✅ | ✅ |
 | Unclickable active character and camera occluders | ✅ | ✅ ⁵ | ✅ ⁵ |
 | Camera tweaks: free pitch, zoom limits, FOV, offsets ([Native Camera Tweaks](https://www.nexusmods.com/baldursgate3/mods/945)) | separate mod | ✅ ⁶ | ✅ ⁶ |
@@ -116,7 +116,6 @@ Notes on the macOS column:
 - ⁴ ⁷ As on Linux.
 - ⁵ The active character and camera occluders (`PreventClickingCameraOccluders`).
 - ⁶ As on Linux.
-- ⁸ Without Windows' fix of a rare chase camera symptom (`PreventLosingChaseCamTargetHook`).
 - On Linux and macOS, edge panning doesn't work in Camera mode either: the game itself doesn't allow
   it there, with the mod not involved.
 - The config has the same keys as on Linux. On a Mac keyboard, `alt` is Option and `gui` is

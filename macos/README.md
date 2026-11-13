@@ -108,8 +108,11 @@ An early port for the native macOS game on Apple Silicon. Supported game version
   - Windows and Linux patch those two places in the game code whenever the mode changes. On macOS,
     rewriting code takes away its execute permission for a moment, and another game thread could
     run into that, so these inline hooks stay in place and read a flag.
-- Not ported: Windows' `PreventLosingChaseCamTargetHook`, a fix of a rare chase camera symptom. Its
-  target, `ls::trigger::HitTest`, starts with a branch, so it can't take an inline hook.
+- The chase camera keeps its target in Character mode outside combat, like
+  `PreventLosingChaseCamTargetHook` on Windows, a fix of a rare symptom: the test whether a point is
+  inside the target's bounds says no. `ls::trigger::HitTest` starts with a branch and many systems
+  call it, so the call in `UpdateGameCameraBehavior` is replaced with a 16-byte jump to a stub, as
+  for the camera tweaks.
 - The movement keys are bound in `inputconfig_p1.json` of every player profile in
   `~/Documents/Larian Studios/Baldur's Gate 3/PlayerProfiles/`. It uses the same patcher as the Linux
   port, and keeps the original as `inputconfig_p1.json.bg3-wasd-everywhere.bak` before changing it.
