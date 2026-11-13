@@ -124,6 +124,7 @@ bool g_rotate_input_is_left_click = false;  // CameraToggleMouseRotate includes 
 std::atomic<bool> g_mode_toggles_mouselook{ false };  // TogglingMovementModeAlsoTogglesCameraRotation
 std::atomic<bool> g_prevent_clicking_character{ true };  // PreventClickingActiveCharacter
 std::atomic<float> g_max_click_distance{ 1.0f };          // MaxClickDistanceBehindCharacter, meters
+std::atomic<float> g_max_click_toward_camera{ 0.6f };     // MaxClickDistanceTowardCamera, meters
 std::atomic<bool> g_prevent_clicking_occluders{ false };  // PreventClickingCameraOccluders
 std::atomic<const uint8_t*> g_camera_behavior{ nullptr };  // ecl::GameCameraBehavior, for the occluders
 using CameraPitchFn = float (*)(const uint8_t* camera, bool a, bool b);
@@ -237,6 +238,7 @@ void LoadSettings(bool first)
     g_mode_toggles_mouselook = settings.toggling_movement_mode_also_toggles_camera_rotation;
     g_prevent_clicking_character = settings.prevent_clicking_active_character;
     g_max_click_distance = settings.max_click_distance_behind_character;
+    g_max_click_toward_camera = settings.max_click_distance_toward_camera;
     g_prevent_clicking_occluders = settings.prevent_clicking_camera_occluders;
     camera_tweaks::Configure(settings.camera_tweaks);
     if (first) {
@@ -1454,9 +1456,11 @@ void InstallOccluderHooks(const uintptr_t* addresses)
     if (!WritePointer(slot, reinterpret_cast<uintptr_t>(&RaycastProbe))) {
         return;
     }
-    LOG_INFO("Camera occluders: PhysXScene::RaycastAll hooked (vtable slot %#lx), camera from %s, %s",
+    LOG_INFO("Camera occluders: PhysXScene::RaycastAll hooked (vtable slot %#lx), camera from %s, %s; "
+             "walk-back protection %s",
         (unsigned long)(slot - vtable), g_pitch_update_return ? "the pitch update" : "CalcCamTargetDest",
-        g_prevent_clicking_occluders ? "on" : "off in the config");
+        g_prevent_clicking_occluders ? "on" : "off in the config",
+        g_picking_code[symbols::PickWalkable - symbols::PickGameObject].start ? "through WalkablePick" : "off");
 }
 
 void OnModeChanged(bool was_character, id application, NSEvent* source)
@@ -1861,8 +1865,44 @@ extern "C" void ObserveCameraTarget(void*, void* const* view)
 
 // Called by RaycastProbe for every PhysXScene::RaycastAll, on any thread. Returns the start to
 // use: a moved copy for GameObjectPick's picking ray, otherwise the game's own.
+// Walk-back protection (picking.hpp): WalkablePick's ray, which finds the ground a click moves to,
+// starts at the character's plane, so ground between the camera and the character can't catch it.
+static const float* AdjustWalkableRayStart(const float* start, const float* end)
+{
+    if (!g_prevent_clicking_occluders || !IsCharacterMode() || IsControllerMode()) {
+        return start;
+    }
+    thread_local float moved[3];
+    const wasd::picking::WalkableRay result =
+        wasd::picking::WalkableRayStart(g_camera_behavior.load(std::memory_order_relaxed), start, end,
+            g_max_click_toward_camera.load(std::memory_order_relaxed), moved);
+
+    // The decision, logged when it changes.
+    static std::atomic<int> last_state{ -1 };
+    if (last_state.exchange(int(result)) != int(result)) {
+        const char* what = "moved past the ground between the camera and the character";
+        if (result == wasd::picking::WalkableRay::Cancelled) {
+            what = "cancelled: the cursor is on the ground between the camera and the character";
+        } else if (result == wasd::picking::WalkableRay::NoCamera) {
+            what = "kept: no camera yet";
+        } else if (result == wasd::picking::WalkableRay::CameraException) {
+            what = "kept: camera exception";
+        } else if (result == wasd::picking::WalkableRay::NotTowardCharacter) {
+            what = "kept: it doesn't head toward the character";
+        }
+        LOG_INFO("Walkable ray %s", what);
+    }
+    const bool changed =
+        result == wasd::picking::WalkableRay::Moved || result == wasd::picking::WalkableRay::Cancelled;
+    return changed ? moved : start;
+}
+
 extern "C" const float* AdjustRayStart(const float* start, const float* end, uintptr_t caller)
 {
+    const CodeRange& walkable = g_picking_code[symbols::PickWalkable - symbols::PickGameObject];
+    if (caller >= walkable.start && caller < walkable.end) {
+        return AdjustWalkableRayStart(start, end);
+    }
     const CodeRange& pick = g_picking_code[0];  // GameObjectPick::ExecuteWTKernel
     if (caller < pick.start || caller >= pick.end) {
         return start;

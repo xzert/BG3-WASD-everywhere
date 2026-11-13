@@ -77,7 +77,7 @@ Both ports support game version **4.1.1.7631656** (Hotfix #36).
 | Rotate + left click moves forward | ✅ | ✅ | ✅ |
 | Unclickable active character and camera occluders | ✅ | ✅ ⁵ | ✅ ⁵ |
 | Camera tweaks: free pitch, zoom limits, FOV, offsets ([Native Camera Tweaks](https://www.nexusmods.com/baldursgate3/mods/945)) | separate mod | ✅ ⁶ | ✅ ⁶ |
-| Blocking click-to-move (`BlockInteractMove`) | ✅ | — | — |
+| Blocking click-to-move (`BlockInteractMove`) | ✅ | ✅ ⁷ | — |
 | Movement mode follows turn-based mode (FTB) | ✅ | ✅ | — |
 | Movement keys bound automatically | ✅ | ✅ ³ | ✅ ³ |
 | Config reloads when the file changes | ✅ | ✅ | ✅ |
@@ -98,11 +98,16 @@ Notes on the Linux column:
 - ⁵ The active character (`PreventClickingActiveCharacter`) and camera occluders
   (`PreventClickingCameraOccluders`). A click through the active character lands on the ground at
   most `MaxClickDistanceBehindCharacter` (1 m) behind them; further, the character stays under the
-  cursor, as in vanilla, so a low camera doesn't send them running off.
+  cursor, as in vanilla, so a low camera doesn't send them running off. A click above the
+  character's eyes still lands far ahead, as in vanilla: the game doesn't count the top of the head
+  as the character. With `PreventClickingCameraOccluders`, ground, stairs and ledges between the
+  camera and the character can't be clicked either, except within `MaxClickDistanceTowardCamera`
+  (0.6 m) of the character, so a click doesn't send the character back toward the camera.
 - ⁶ Built in and on by default (`CameraTweaks`), with the same config keys as Native Camera Tweaks.
   Not ported yet: the gamepad settings, keeping the camera above the floor and keeping the zoom on a
   zone change. Without the floor check, the free pitch stops at 0 (looking straight ahead) by
   default.
+- ⁷ Not in combat, even in Character mode, so turn-based fights stay playable.
 
 Notes on the macOS column:
 
@@ -175,9 +180,6 @@ including why Steam needs the launcher, are in [macos/README.md](macos/README.md
 1. Finish the Linux port: everything marked "—" in the Linux column above.
 2. Finish the macOS port: the rest of the table (Camera mode in combat, edge panning, turn-based
    mode) and a release build.
-3. Walk-back protection: a click on ground, stairs or a ledge between the camera and the character
-   should not send the character back toward the camera. A click through the character already
-   lands at most `MaxClickDistanceBehindCharacter` behind them.
 
 ## Building the Windows version
 

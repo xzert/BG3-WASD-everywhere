@@ -50,7 +50,12 @@ void OnCloseAllPanels();
 // (BlockEdgePanningHook and PreventLosingChaseCamTargetHook on Windows).
 bool InstallCharacterModeCamera(const mem::MainExecutable& exe, uintptr_t is_in_controller_mode);
 
-// Call when the movement mode or the combat state changes.
+// BlockInteractMove: in Character mode outside combat, with the setting on, a click on the ground
+// (Interact) doesn't move the character, neither clicked nor held. Objects and people still work.
+bool InstallInteractMoveBlocker(const mem::MainExecutable& exe);
+
+// Call when the movement mode, the combat state or the config changes. Applies the edge panning and
+// chase camera patch and the interact move blocker.
 void UpdateCharacterModeCamera();
 
 }  // namespace wasd::camera

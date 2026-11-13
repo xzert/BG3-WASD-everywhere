@@ -26,8 +26,10 @@ struct State {
     std::atomic<bool> mode_toggles_mouselook{ false };   // TogglingMovementModeAlsoTogglesCameraRotation
     std::atomic<bool> prevent_clicking_active_character{ true };
     std::atomic<float> max_click_distance_behind_character{ 1.0f };  // meters
+    std::atomic<float> max_click_distance_toward_camera{ 0.6f };     // meters, walk-back protection
     std::atomic<uint64_t> active_character{ 0 };  // its entity handle, from OnSelectedCharacterChanged
     std::atomic<bool> prevent_clicking_camera_occluders{ false };
+    std::atomic<bool> block_interact_move{ false };
     std::atomic<const uint8_t*> camera{ nullptr };  // ecl::GameCameraBehavior, from the camera update
 
     // When the game last asked for the movement input (it does so every frame while the player can move).

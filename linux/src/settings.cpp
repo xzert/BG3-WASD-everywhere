@@ -117,7 +117,10 @@ void ReloadSettings()
     state.mode_toggles_mouselook = settings.toggling_movement_mode_also_toggles_camera_rotation;
     state.prevent_clicking_active_character = settings.prevent_clicking_active_character;
     state.max_click_distance_behind_character = settings.max_click_distance_behind_character;
+    state.max_click_distance_toward_camera = settings.max_click_distance_toward_camera;
     state.prevent_clicking_camera_occluders = settings.prevent_clicking_camera_occluders;
+    state.block_interact_move = settings.block_interact_move;
+    camera::UpdateCharacterModeCamera();  // BlockInteractMove may have changed
     camera_tweaks::Configure(settings.camera_tweaks);
     input::SetBindings(settings);
     camera::SetRotationCursors(camera::ParseRotationCursor(settings.rotation_cursor_in_character_mode),

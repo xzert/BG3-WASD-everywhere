@@ -101,7 +101,28 @@ struct OccluderAddresses {
     // start in rsi, end in rdx, ...). Windows calls the same function through slot 0x40: MSVC has one
     // destructor slot where the Itanium ABI has two.
     uintptr_t raycast_site = 0;
+    // In ecl::PickingHelper::WalkablePick::ExecuteWTKernel, the ray that finds the ground a click
+    // moves to: `mov dword [rsp], 0x194280 ; call rax` (9 bytes), RaycastAll with the start at this+0x10
+    // and the end at this+0x1C. Optional: 0 if not found.
+    uintptr_t walkable_ray_site = 0;
 };
+
+// BlockInteractMove, like BlockInteractMovePatch and BlockHoldInteractMovePatch on Windows. The macOS
+// build names both functions.
+struct InteractMoveAddresses {
+    // ecl::CharacterTask_MoveTo::OnInputEvent(this, const ls::InputEvent&) starts with
+    // `cmp dword [rsi], 4 ; je +15 ; xor eax, eax ; <epilogue> ; ret`: only Interact (id 4) goes on.
+    // The `je` (74 0F) becomes a two-byte nop, so a click on the ground starts no move. Its body
+    // matches Windows and macOS: +0xA0, then the bytes +0x22 and +0x20, then the flag +0x15C.
+    uintptr_t click_move_je = 0;
+    // ecl::InputController::OnInputEvent, Interact pressed: `mov rcx, 0x10000000000 ; ... ;
+    // mov [r14+0x1C], rcx` writes 0 to +0x1C and 0x100 to +0x20, where the byte +0x21 means "held".
+    // The address of the immediate's bytes 5 and 6 (00 01), which become 00 00: no move while held.
+    uintptr_t hold_move_flag = 0;
+};
+
+bool FindInteractMoveAddresses(const uint8_t* text, size_t size, uintptr_t text_address, InteractMoveAddresses& out,
+    std::string& error);
 
 bool FindOccluderAddresses(const uint8_t* text, size_t size, uintptr_t text_address, OccluderAddresses& out,
     std::string& error);

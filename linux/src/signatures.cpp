@@ -255,6 +255,27 @@ bool FindUnclickableCharacterAddresses(const uint8_t* text, size_t size, uintptr
     return true;
 }
 
+bool FindInteractMoveAddresses(const uint8_t* text, size_t size, uintptr_t text_address, InteractMoveAddresses& out,
+    std::string& error)
+{
+    // CharacterTask_MoveTo::OnInputEvent: the Interact check, pressed (+0x10) and not repeated (+0x1C),
+    // then the character (+0x68) and its +0x12C and +0xA0. Other tasks start the same way up to +0x68.
+    const auto click = FindPattern(text, size,
+        "83 3E 04 74 0F 31 C0 48 83 C4 10 5B 41 5C 41 5E 41 5F 5D C3 80 7E 10 00 74 EB 80 7E 1C 00 75 E5 48 8B 4F "
+        "68 4C 8B 05 ?? ?? ?? ?? BD 00 00 01 00 8B 81 2C 01 00 00 48 8B B1 A0 00 00 00");
+    // InputController::OnInputEvent: NaN for +0x40, then 0x10000000000 for +0x1C, stored through r14.
+    const auto hold = FindPattern(text, size,
+        "48 B8 00 00 00 00 00 00 C0 FF 48 B9 00 00 00 00 00 01 00 00 49 89 46 40 49 89 4E 1C");
+    if (click.size() != 1 || hold.size() != 1) {
+        error = "the click move check matched " + std::to_string(click.size()) + " times, the hold move flag " +
+            std::to_string(hold.size()) + ", expected 1 each";
+        return false;
+    }
+    out.click_move_je = text_address + click[0] + 3;
+    out.hold_move_flag = text_address + hold[0] + 16;
+    return true;
+}
+
 bool FindOccluderAddresses(const uint8_t* text, size_t size, uintptr_t text_address, OccluderAddresses& out,
     std::string& error)
 {
@@ -279,6 +300,13 @@ bool FindOccluderAddresses(const uint8_t* text, size_t size, uintptr_t text_addr
     }
     out.camera_pitch = text_address + pitch[0];
     out.raycast_site = text_address + ray[0] + 7;
+    // The walkable ray: start and end from the pick, RaycastAll from the vtable, then the stack
+    // arguments; the last two (mask 0x194280, call rax) are what the hook replaces.
+    const auto walkable = FindPattern(text, size,
+        "48 8D 53 1C 48 8D 73 10 48 8B 07 48 8B 40 48 0F 10 84 24 ?? ?? 00 00 B9 FF FF FF FF 41 B8 05 00 00 00 "
+        "41 B9 20 08 00 00 0F 11 44 24 20 89 4C 24 18 89 4C 24 10 4C 89 F1 C7 44 24 08 01 00 00 00 C7 04 24 80 42 "
+        "19 00 FF D0");
+    out.walkable_ray_site = walkable.size() == 1 ? text_address + walkable[0] + 64 : 0;
     return true;
 }
 

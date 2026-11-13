@@ -68,7 +68,9 @@ struct Settings {
     // macOS only so far.
     bool prevent_clicking_active_character = true;
     float max_click_distance_behind_character = 1.0f;  // meters
+    float max_click_distance_toward_camera = 0.6f;     // meters
     bool prevent_clicking_camera_occluders = false;
+    bool block_interact_move = false;
     CameraTweakSettings camera_tweaks;
 };
 

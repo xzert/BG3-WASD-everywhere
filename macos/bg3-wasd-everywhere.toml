@@ -67,8 +67,10 @@ RotatePlusLeftclickMovesForward = true
 
 PreventClickingCameraOccluders = false
 # If true, the cursor ignores objects that are closer to the camera than the active character, in
-# Character movement mode. This prevents accidentally clicking on your trailing companions. If you
-# zoom out a lot or have a steep camera angle, the mod makes an exception. Vanilla is false.
+# Character movement mode. This prevents accidentally clicking on your trailing companions. Ground,
+# stairs and ledges between the camera and your character can't be clicked either, so a click
+# doesn't send your character back toward the camera. If you zoom out a lot or have a steep camera
+# angle, the mod makes an exception. Vanilla is false.
 # [true, false]
 
 PreventClickingActiveCharacter = true
@@ -83,6 +85,12 @@ MaxClickDistanceBehindCharacter = 1.0
 # and reaches the ground far behind, and a click there sends the character running off. Further than
 # this, your character stays under the cursor, as in vanilla. Objects behind your character count by
 # the ground under the cursor's line, not by their own distance. 1000 means no limit.
+
+MaxClickDistanceTowardCamera = 0.6
+# With PreventClickingCameraOccluders, how far from your character toward the camera, in meters, a
+# click may land on the ground. Further, between the camera and your character, a click does
+# nothing, so it doesn't send your character back toward the camera. 0.6 lets you step back a
+# little.
 
 
 [Walking]

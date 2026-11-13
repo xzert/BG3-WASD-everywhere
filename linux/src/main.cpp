@@ -24,6 +24,7 @@
 
 // The picking ray hook and the camera speed stores, written in assembly at the end of this file.
 extern "C" __attribute__((visibility("hidden"))) void wasd_RaycastSiteStub();
+extern "C" __attribute__((visibility("hidden"))) void wasd_WalkableRaySiteStub();
 extern "C" __attribute__((visibility("hidden"))) void wasd_ZoomSpeedStub();
 extern "C" __attribute__((visibility("hidden"))) void wasd_RotationSpeedStub();
 
@@ -366,6 +367,7 @@ bool Install()
         camera::Install(exe, execute_camera_command);
     }
     camera::InstallCharacterModeCamera(exe, game.is_in_controller_mode);
+    camera::InstallInteractMoveBlocker(exe);
     InstallGameEvents(exe);
     InstallUnclickableCharacter(exe);
     // The camera speed stores only work through the ExecuteCameraCommand hook.
@@ -551,6 +553,23 @@ void InstallCameraOccluders(const mem::MainExecutable& exe, const OccluderAddres
     LOG_INFO("Camera occluders: GetCameraPitchDegrees %#lx, picking ray %#lx, %s",
         file_address(addresses.camera_pitch), file_address(addresses.raycast_site),
         GetState().prevent_clicking_camera_occluders ? "on" : "off in the config");
+
+    // Walk-back protection: `mov dword [rsp], 0x194280 ; call rax` becomes `call stub ; nop4`.
+    void* walkable_stub = addresses.walkable_ray_site
+        ? mem::MakeJumpStub(addresses.walkable_ray_site, reinterpret_cast<const void*>(&wasd_WalkableRaySiteStub))
+        : nullptr;
+    uint8_t walkable[9] = { 0xE8, 0, 0, 0, 0, 0x0F, 0x1F, 0x40, 0x00 };
+    if (walkable_stub) {
+        const int32_t walkable_rel = static_cast<int32_t>(reinterpret_cast<intptr_t>(walkable_stub) -
+                                                          static_cast<intptr_t>(addresses.walkable_ray_site + 5));
+        std::memcpy(walkable + 1, &walkable_rel, sizeof walkable_rel);
+    }
+    if (!walkable_stub || !mem::WriteCode(addresses.walkable_ray_site, walkable, sizeof walkable)) {
+        LOG_WARN("Walk-back protection off: the walkable ray %s",
+            addresses.walkable_ray_site ? "could not be patched" : "was not found");
+        return;
+    }
+    LOG_INFO("Walk-back protection: walkable ray %#lx", file_address(addresses.walkable_ray_site));
 }
 
 // Camera tweaks ported from Native Camera Tweaks by ersh1 (camera_tweaks.cpp): the camera update's
@@ -754,6 +773,40 @@ extern "C" __attribute__((visibility("hidden"), used, noinline, noipa)) const fl
     return moved;
 }
 
+// Called by wasd_WalkableRaySiteStub on a picking worker thread with the walkable ray's start and end
+// (walk-back protection, picking.hpp). Returns the start to use.
+extern "C" __attribute__((visibility("hidden"), used, noinline, noipa)) const float* wasd_AdjustWalkableRayStart(
+    const float* start, const float* end)
+{
+    using namespace wasd;
+    const State& state = GetState();
+    if (!state.prevent_clicking_camera_occluders || !state.IsCharacterMovementMode() || state.IsInControllerMode()) {
+        return start;
+    }
+    thread_local float moved[3];
+    const picking::WalkableRay result =
+        picking::WalkableRayStart(state.camera.load(std::memory_order_relaxed), start, end,
+            state.max_click_distance_toward_camera.load(std::memory_order_relaxed), moved);
+
+    // The decision, logged when it changes.
+    static std::atomic<int> last_state{ -1 };
+    if (last_state.exchange(static_cast<int>(result)) != static_cast<int>(result)) {
+        const char* what = "moved past the ground between the camera and the character";
+        if (result == picking::WalkableRay::Cancelled) {
+            what = "cancelled: the cursor is on the ground between the camera and the character";
+        } else if (result == picking::WalkableRay::NoCamera) {
+            what = "kept: no camera yet";
+        } else if (result == picking::WalkableRay::CameraException) {
+            what = "kept: camera exception";
+        } else if (result == picking::WalkableRay::NotTowardCharacter) {
+            what = "kept: it doesn't head toward the character";
+        }
+        LOG_INFO("Walkable ray %s", what);
+    }
+    const bool changed = result == picking::WalkableRay::Moved || result == picking::WalkableRay::Cancelled;
+    return changed ? moved : start;
+}
+
 // Replaces `mov rcx, [rsp+0xB0] ; call [rax+0x48]` in GameObjectPick, entered with `call`: does the
 // mov (0xB8 past the return address), swaps rsi for wasd_AdjustRayStart's answer and jumps to
 // RaycastAll, which returns to the game. The argument registers are kept; seven pushes after the
@@ -787,6 +840,41 @@ wasd_RaycastSiteStub:
     movq %r11, %rsi
     jmpq *0x48(%rax)
     .size wasd_RaycastSiteStub, .-wasd_RaycastSiteStub
+    .popsection
+)");
+
+// Replaces `mov dword [rsp], 0x194280 ; call rax` in WalkablePick, entered with `call`: stores the
+// mask (8 past the return address), swaps rsi for wasd_AdjustWalkableRayStart's answer and jumps to
+// RaycastAll, which returns to the game. As in wasd_RaycastSiteStub, seven pushes align the stack.
+asm(R"(
+    .pushsection .text
+    .p2align 4
+    .globl wasd_WalkableRaySiteStub
+    .hidden wasd_WalkableRaySiteStub
+    .type wasd_WalkableRaySiteStub, @function
+wasd_WalkableRaySiteStub:
+    movl $0x194280, 0x8(%rsp)
+    pushq %rax
+    pushq %rdi
+    pushq %rsi
+    pushq %rdx
+    pushq %rcx
+    pushq %r8
+    pushq %r9
+    movq %rsi, %rdi
+    movq %rdx, %rsi
+    call wasd_AdjustWalkableRayStart
+    movq %rax, %r11
+    popq %r9
+    popq %r8
+    popq %rcx
+    popq %rdx
+    popq %rsi
+    popq %rdi
+    popq %rax
+    movq %r11, %rsi
+    jmpq *%rax
+    .size wasd_WalkableRaySiteStub, .-wasd_WalkableRaySiteStub
     .popsection
 )");
 

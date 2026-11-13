@@ -358,6 +358,15 @@ constexpr uint16_t kNopJmpOpcode = 0xE990;  // bytes 90 E9: nop ; jmp rel32, sam
 std::mutex g_edge_panning_mutex;
 uintptr_t g_edge_panning_jne = 0;
 bool g_edge_panning_blocked = false;
+
+// BlockInteractMove, under the same mutex. Both patches are two-byte atomic writes.
+constexpr uint16_t kClickMoveJe = 0x0F74;       // bytes 74 0F: je +15
+constexpr uint16_t kTwoByteNop = 0x9066;        // bytes 66 90
+constexpr uint16_t kHoldMoveFlag = 0x0100;      // bytes 00 01 of the immediate: +0x21 = 1, held
+constexpr uint16_t kNoHoldMoveFlag = 0x0000;
+uintptr_t g_click_move_je = 0;
+uintptr_t g_hold_move_flag = 0;
+bool g_interact_move_blocked = false;
 CursorFn g_bounds_test = nullptr;
 
 bool CharacterModeCameraActive()
@@ -377,9 +386,29 @@ RegisterPair BoundsTestHook(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, 
 
 }  // namespace
 
+// Called with g_edge_panning_mutex held.
+static void UpdateInteractMoveBlocker()
+{
+    if (!g_click_move_je) {
+        return;
+    }
+    const bool block = CharacterModeCameraActive() && GetState().block_interact_move;
+    if (block == g_interact_move_blocked) {
+        return;
+    }
+    if (!mem::WriteCodeAtomic16(g_click_move_je, block ? kTwoByteNop : kClickMoveJe) ||
+        !mem::WriteCodeAtomic16(g_hold_move_flag, block ? kNoHoldMoveFlag : kHoldMoveFlag)) {
+        LOG_WARN("Could not %s interact moves: %s", block ? "block" : "restore", std::strerror(errno));
+        return;
+    }
+    g_interact_move_blocked = block;
+    LOG_INFO("Interact moves %s", block ? "blocked" : "allowed");
+}
+
 void UpdateCharacterModeCamera()
 {
     std::lock_guard lock(g_edge_panning_mutex);
+    UpdateInteractMoveBlocker();
     if (!g_edge_panning_jne) {
         return;
     }
@@ -428,6 +457,35 @@ bool InstallCharacterModeCamera(const mem::MainExecutable& exe, uintptr_t is_in_
     UpdateCharacterModeCamera();
     LOG_INFO("Edge panning check %#lx, chase camera bounds call %#lx", file_address(addresses.edge_panning_jne),
         file_address(addresses.bounds_call));
+    return true;
+}
+
+bool InstallInteractMoveBlocker(const mem::MainExecutable& exe)
+{
+    auto file_address = [&](uintptr_t address) { return static_cast<unsigned long>(address - exe.load_bias); };
+    InteractMoveAddresses addresses;
+    std::string error;
+    if (!FindInteractMoveAddresses(reinterpret_cast<const uint8_t*>(exe.code.start), exe.code.size, exe.code.start,
+            addresses, error)) {
+        LOG_WARN("BlockInteractMove unavailable: %s", error.c_str());
+        return false;
+    }
+    uint16_t click, hold;
+    std::memcpy(&click, reinterpret_cast<const void*>(addresses.click_move_je), sizeof click);
+    std::memcpy(&hold, reinterpret_cast<const void*>(addresses.hold_move_flag), sizeof hold);
+    if (click != kClickMoveJe || hold != kHoldMoveFlag || (addresses.click_move_je & 63) == 63 ||
+        (addresses.hold_move_flag & 63) == 63) {
+        LOG_WARN("BlockInteractMove unavailable: unexpected code");
+        return false;
+    }
+    {
+        std::lock_guard lock(g_edge_panning_mutex);
+        g_click_move_je = addresses.click_move_je;
+        g_hold_move_flag = addresses.hold_move_flag;
+    }
+    LOG_INFO("BlockInteractMove: click move check %#lx, hold move flag %#lx, %s", file_address(addresses.click_move_je),
+        file_address(addresses.hold_move_flag), GetState().block_interact_move ? "on" : "off in the config");
+    UpdateCharacterModeCamera();
     return true;
 }
 

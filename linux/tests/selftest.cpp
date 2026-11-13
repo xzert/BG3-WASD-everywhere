@@ -174,8 +174,21 @@ int main(int argc, char** argv)
         std::printf("FAILED (camera occluders): %s\n", error.c_str());
         ++failures;
     } else {
-        std::printf("GetCameraPitchDegrees %#lx, picking ray %#lx\n", Hex(occluders.camera_pitch),
-            Hex(occluders.raycast_site));
+        std::printf("GetCameraPitchDegrees %#lx, picking ray %#lx, walkable ray %#lx\n", Hex(occluders.camera_pitch),
+            Hex(occluders.raycast_site), Hex(occluders.walkable_ray_site));
+        if (!occluders.walkable_ray_site) {
+            std::printf("FAILED (camera occluders): the walkable ray matched 0 or several times\n");
+            ++failures;
+        }
+    }
+
+    wasd::InteractMoveAddresses interact;
+    if (!wasd::FindInteractMoveAddresses(text.data, text.size, text.address, interact, error)) {
+        std::printf("FAILED (BlockInteractMove): %s\n", error.c_str());
+        ++failures;
+    } else {
+        std::printf("Interact move         click check %#lx, hold flag %#lx\n", Hex(interact.click_move_je),
+            Hex(interact.hold_move_flag));
     }
 
     wasd::CameraTweakAddresses tweaks;

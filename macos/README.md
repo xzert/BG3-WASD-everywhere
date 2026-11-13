@@ -69,6 +69,12 @@ An early port for the native macOS game on Apple Silicon. Supported game version
   in its vtable and changes only rays cast from `GameObjectPick`. The camera
   (`ecl::GameCameraBehavior`) is the one the camera tweaks' pitch update sees, the one the player
   looks through; without that hook, it comes from `ecl::CameraSystem::CalcCamTargetDest`.
+  - Walk-back protection, with the same setting and exception: rays cast from
+    `ecl::PickingHelper::WalkablePick`, which finds the ground a click moves to, start at the
+    vertical plane through the character (`MaxClickDistanceTowardCamera`, 0.6 m by default, on the
+    camera's side of it), so ground, stairs and ledges between the camera and the character don't
+    send the character back toward the camera. A click on the ground between them is cancelled, as
+    on Linux.
 - Camera tweaks (`CameraTweaks`, on by default), the same as on Linux and with the same core
   (`../linux/src/camera_tweaks.cpp`), ported from
   [Native Camera Tweaks](https://github.com/ersh1/BG3_NativeCameraTweaks) by ersh1: the free pitch

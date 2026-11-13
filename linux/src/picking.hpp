@@ -52,4 +52,65 @@ inline Measure GroundDistanceBehind(const uint8_t* camera, const Ray& ray)
     return m;
 }
 
+// Walk-back protection, with the camera occluders: the ray of WalkablePick, which finds the ground
+// a click moves to, starts at the vertical plane through the character, square to the camera's
+// horizontal direction, less `margin` (MaxClickDistanceTowardCamera). Ground, stairs and ledges
+// between the camera and the character then can't catch a click and send the character back toward
+// the camera; the ground at the character's feet stays clickable. A distance along the ray, as for
+// the occluders, would miss the ground below a close camera. The occluders' exception (zoom × pitch
+// ≥ 300) applies too: from a steep or distant camera the ground below the character on screen is a
+// normal click.
+//
+// When the ray is already below the character's feet at that plane, the cursor is on the ground
+// between the camera and the character. Started there, the ray would begin underground and could
+// hit a surface below, from which the game picks the nearest walkable spot, often ahead of the
+// character. Such a click is cancelled instead: the ray shrinks to its last centimeter, far away,
+// and hits nothing, like a click on the sky.
+enum class WalkableRay { Moved, Cancelled, NoCamera, CameraException, NotTowardCharacter };
+
+inline WalkableRay WalkableRayStart(
+    const uint8_t* camera, const float* start, const float* end, float margin, float moved[3])
+{
+    if (!camera) {
+        return WalkableRay::NoCamera;
+    }
+    float zoom = 0.0f, pitch = 0.0f, root[3];
+    std::memcpy(&zoom, camera + 0x54, sizeof zoom);
+    std::memcpy(&pitch, camera + 0x164, sizeof pitch);
+    std::memcpy(root, camera + 0x18, sizeof root);
+    constexpr float kThreshold = 300.0f;  // as in the occluders
+    if (!(zoom > 0.0f) || !(zoom * pitch < kThreshold) || !std::isfinite(root[0]) || !std::isfinite(root[2])) {
+        return WalkableRay::CameraException;
+    }
+    const float to_x = root[0] - start[0], to_z = root[2] - start[2];
+    const float distance = std::sqrt(to_x * to_x + to_z * to_z);
+    const float d[3] = { end[0] - start[0], end[1] - start[1], end[2] - start[2] };
+    // How far the ray moves toward the character's plane per unit of t.
+    const float along = distance > 0.01f ? (d[0] * to_x + d[2] * to_z) / distance : 0.0f;
+    const float t = along > 0.0f ? (distance - margin) / along : 0.0f;
+    if (!(t > 0.0f && t < 1.0f)) {
+        return WalkableRay::NotTowardCharacter;
+    }
+    for (int i = 0; i < 3; ++i) {
+        moved[i] = start[i] + d[i] * t;
+    }
+    // The feet as in GroundDistanceBehind: +0xC4, under the root.
+    float feet[3];
+    std::memcpy(feet, camera + 0xC4, sizeof feet);
+    const float height = root[1] - feet[1];
+    if (!(height > 0.2f && height < 4.0f) || !(std::fabs(feet[0] - root[0]) < 1.0f) ||
+        !(std::fabs(feet[2] - root[2]) < 1.0f)) {
+        return WalkableRay::CameraException;
+    }
+    constexpr float kBelowFeet = 0.25f;  // slack for uneven ground at the character's plane
+    if (moved[1] < feet[1] - kBelowFeet) {
+        const float length = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        for (int i = 0; i < 3; ++i) {
+            moved[i] = end[i] - d[i] / length * 0.01f;
+        }
+        return WalkableRay::Cancelled;
+    }
+    return WalkableRay::Moved;
+}
+
 }  // namespace wasd::picking

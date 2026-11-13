@@ -81,6 +81,23 @@ an error and stays inactive.
   `phx::PhysXScene::RaycastAll` with a stub that moves its start; the camera
   (`ecl::GameCameraBehavior`) comes from `GetCameraPitchDegrees`, which the camera update calls
   every frame.
+  - Walk-back protection, with the same setting and exception: the ray of
+    `ecl::PickingHelper::WalkablePick`, which finds the ground a click moves to, starts at the
+    vertical plane through the character (`MaxClickDistanceTowardCamera`, 0.6 m by default, on the
+    camera's side of it). Ground, stairs and ledges between the camera and the character then don't
+    send the character back toward the camera. A plane rather than the zoom distance, because below
+    a close camera the ground is further away than the zoom. When the ray is already below the
+    character's feet at that plane, the click is on the ground between them and is cancelled:
+    started there, the ray would begin underground, and the game could pick a spot ahead of the
+    character. The mod replaces the ray's `mov dword [rsp], 0x194280 ; call rax` with a stub.
+- `BlockInteractMove` (off by default, as on Windows): in Character mode outside combat, a click on
+  the ground doesn't move the character, neither clicked nor held; objects and people still work.
+  The function names come from the macOS build. In `ecl::CharacterTask_MoveTo::OnInputEvent`, the
+  `je` after the Interact check (`cmp dword [rsi], 4`) becomes a nop, so a click starts no move. In
+  `ecl::InputController::OnInputEvent`, the constant that sets the "held" flag (+0x21) becomes 0, so
+  holding the button starts none either. Both are two-byte writes, switched with the movement mode,
+  combat and the config. Unlike Windows, the mod lets click moves through in combat, even in
+  Character mode, so turn-based fights stay playable.
 - Camera tweaks (`CameraTweaks`, on by default), ported from
   [Native Camera Tweaks](https://github.com/ersh1/BG3_NativeCameraTweaks) by ersh1. The config keys
   are the same as in `BG3NativeCameraTweaks.toml`.
@@ -105,12 +122,14 @@ an error and stays inactive.
   - mouselook doesn't pause by itself for the loot window and photo mode;
   - the crosshair icon for `centered`.
 - Hotkeys still work while menus are open. They are ignored only while you type into a text field.
-- No interact-move blocker.
 - From the camera tweaks: the gamepad settings, the floor check and keeping the zoom on a zone
   change.
 
 ## Known issues
 
+- A click on the active character above eye level still sends them far ahead, as in vanilla: the
+  character's shape for picking ends around the eyes, so the game takes the click for the ground
+  behind them, and `MaxClickDistanceBehindCharacter` doesn't apply.
 - With the game's Edge Panning option on, moving the cursor to the screen edge doesn't pan the camera
   in Camera mode either. In that mode the mod has restored the game's original code (the log shows
   `Edge panning allowed (code now 0f 85)`), so the cause is elsewhere and not yet known. Panning with

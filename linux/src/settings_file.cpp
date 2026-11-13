@@ -200,6 +200,10 @@ bool ParseSettingsFile(const std::string& path, Settings& s)
             s.prevent_clicking_active_character = ParseBool(value, s.prevent_clicking_active_character);
         } else if (key == "MaxClickDistanceBehindCharacter") {
             ParseNumber(value, s.max_click_distance_behind_character);
+        } else if (key == "BlockInteractMove") {
+            s.block_interact_move = ParseBool(value, s.block_interact_move);
+        } else if (key == "MaxClickDistanceTowardCamera") {
+            ParseNumber(value, s.max_click_distance_toward_camera);
         } else if (key == "RotatePlusLeftclickMovesForward") {
             s.rotate_plus_lmb_is_forward = ParseBool(value, s.rotate_plus_lmb_is_forward);
         } else {
