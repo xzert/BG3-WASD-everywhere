@@ -92,6 +92,12 @@ MaxClickDistanceTowardCamera = 0.6
 # nothing, so it doesn't send your character back toward the camera. 0.6 lets you step back a
 # little.
 
+BlockInteractMove = false
+# During Character movement mode, outside combat, block that leftclicking the ground moves your
+# character, both a click and holding the button. (Or whatever key you have bound to the "Interact"
+# command.) Interacting with objects and people still works. Vanilla is false.
+# [true, false]
+
 
 [Walking]
 
@@ -104,8 +110,20 @@ IsWalkingDefault = false
 # Whether the character walks, when the game starts up.
 # [true, false]
 
+SwitchToWalkingAfterCombat = false
+# Whether to switch to walking, when combat ends.
+# [true, false]
+
 
 [AutoToggleMovementMode]
+
+AutoToggleMovementMode = true
+# Automatically toggle movement mode depending on the context.
+# Toggle to Camera movement, when combat or turn-based mode starts, and back to Character movement,
+# when it ends.
+# If you load a savegame in the middle of a fight, the mod notices only when that fight ends, so
+# press ToggleMovementMode yourself.
+# [true, false]
 
 IsCharacterMovementDefault = true
 # Whether the game starts in Character or Camera movement mode.
@@ -257,10 +275,6 @@ InvertMousePitch = false
 
 KeyboardCameraRotationMult = 2.0
 # Speed of the camera rotation with the keys. 1.0 is vanilla.
-
-
-# Not available on macOS yet, and ignored if present: SwitchToWalkingAfterCombat,
-# AutoToggleMovementMode, BlockInteractMove.
 
 
 # List of all available keys for mod hotkeys:

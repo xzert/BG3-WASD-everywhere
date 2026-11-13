@@ -70,15 +70,15 @@ Both ports support game version **4.1.1.7631656** (Hotfix #36).
 | WASD character movement, autoforward, walking, Character/Camera movement mode | ✅ | ✅ | ✅ |
 | Movement keys don't pan the camera in Character mode | ✅ | ✅ | ✅ |
 | Camera rotation with an invisible or centered cursor | ✅ | ✅ ¹ | ✅ ¹ |
-| Automatic Camera mode in combat | ✅ | ✅ ⁴ | — |
+| Automatic Camera mode in combat | ✅ | ✅ ⁴ | ✅ ⁴ |
 | `ToggleCameraRotation` (mouselook without holding a button) | ✅ | ✅ | ✅ |
 | Rotation turns off in menus, dialogs, loot and photo mode | ✅ | ✅ ² | ✅ ² |
-| No edge panning in Character mode | ✅ | ✅ | — |
+| No edge panning in Character mode | ✅ | ✅ | ✅ ⁸ |
 | Rotate + left click moves forward | ✅ | ✅ | ✅ |
 | Unclickable active character and camera occluders | ✅ | ✅ ⁵ | ✅ ⁵ |
 | Camera tweaks: free pitch, zoom limits, FOV, offsets ([Native Camera Tweaks](https://www.nexusmods.com/baldursgate3/mods/945)) | separate mod | ✅ ⁶ | ✅ ⁶ |
-| Blocking click-to-move (`BlockInteractMove`) | ✅ | ✅ ⁷ | — |
-| Movement mode follows turn-based mode (FTB) | ✅ | ✅ | — |
+| Blocking click-to-move (`BlockInteractMove`) | ✅ | ✅ ⁷ | ✅ ⁷ |
+| Movement mode follows turn-based mode (FTB) | ✅ | ✅ | ✅ ⁴ |
 | Movement keys bound automatically | ✅ | ✅ ³ | ✅ ³ |
 | Config reloads when the file changes | ✅ | ✅ | ✅ |
 
@@ -112,10 +112,12 @@ Notes on the Linux column:
 Notes on the macOS column:
 
 - ¹ ² ³ As on Linux. Mouselook's pause in dialogs isn't checked in game yet.
+- ⁴ ⁷ As on Linux.
 - ⁵ The active character and camera occluders (`PreventClickingCameraOccluders`).
 - ⁶ As on Linux.
-- The config has only the settings the port supports so far. Key names are the same as on Linux;
-  on a Mac keyboard, `alt` is Option and `gui` is Command.
+- ⁸ Without Windows' fix of a rare chase camera symptom (`PreventLosingChaseCamTargetHook`).
+- The config has the same keys as on Linux. On a Mac keyboard, `alt` is Option and `gui` is
+  Command.
 
 ### Install on Linux
 
@@ -178,8 +180,7 @@ including why Steam needs the launcher, are in [macos/README.md](macos/README.md
 ## Roadmap
 
 1. Finish the Linux port: everything marked "—" in the Linux column above.
-2. Finish the macOS port: the rest of the table (Camera mode in combat, edge panning, turn-based
-   mode) and a release build.
+2. Finish the macOS port: a release build.
 
 ## Building the Windows version
 

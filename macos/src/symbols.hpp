@@ -37,6 +37,10 @@ enum Index {
     RaycastAll,                // phx::PhysXScene::RaycastAll(Vector3f const& start, Vector3f const& end, ...) const
     GetCameraPitchDegrees,     // ecl::GameCameraBehavior::GetCameraPitchDegrees(bool, bool) const
     UpdateGameCameraBehavior,  // ecl::CameraSystem::UpdateGameCameraBehavior(ecs::WorldView<...>&, ls::GameTime const&, ...)
+    FillAllEventsData,         // ecl::GameAnalyticsSystem::FillAllEventsData(json::Value&, char const* name) const
+    IsEdgePanningAllowed,      // ecl::CameraSystem::IsEdgePanningAllowed(EntityView<EocCameraBehavior, GameCameraBehavior, ...> const&) const
+    MoveToOnInputEvent,        // ecl::CharacterTask_MoveTo::OnInputEvent(ls::InputEvent const&)
+    InputControllerOnInputEvent,  // ecl::InputController::OnInputEvent(ls::InputEvent const&)
     Count
 };
 
@@ -97,6 +101,11 @@ inline constexpr const char* kNames[Count] = {
     "EKNSF_15SplineComponentEKNSF_13TerrainObjectEKNSF_7trigger13AreaComponentEKNSF_4uuid9Compone"
     "ntEEEERKNSF_8GameTimeERKNS1_8_private10EntityViewIJNSF_8TypeListIJSB_SH_S15_KSN_EEENS4C_IJSV"
     "_SX_S2M_EEEEEE",
+    "__ZNK3ecl19GameAnalyticsSystem17FillAllEventsDataERN4json5ValueEPKc",
+    ("__ZNK3ecl12CameraSystem20IsEdgePanningAllowedERKN3ecs8_private10EntityViewIJN2ls8TypeListIJKNS_17EocCamera"
+     "BehaviorEKNS_18GameCameraBehaviorEEEENS5_IJKNS_6camera23PlatformTargetComponentEEEEEEE"),
+    "__ZN3ecl20CharacterTask_MoveTo12OnInputEventERKN2ls10InputEventE",
+    "__ZN3ecl15InputController12OnInputEventERKN2ls10InputEventE",
 };
 
 // A vtable symbol points at the offset-to-top entry; virtual function slots start 16 bytes later.

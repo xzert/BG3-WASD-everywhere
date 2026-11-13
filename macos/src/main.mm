@@ -126,6 +126,10 @@ std::atomic<bool> g_prevent_clicking_character{ true };  // PreventClickingActiv
 std::atomic<float> g_max_click_distance{ 1.0f };          // MaxClickDistanceBehindCharacter, meters
 std::atomic<float> g_max_click_toward_camera{ 0.6f };     // MaxClickDistanceTowardCamera, meters
 std::atomic<bool> g_prevent_clicking_occluders{ false };  // PreventClickingCameraOccluders
+std::atomic<bool> g_auto_toggle_mode{ true };             // AutoToggleMovementMode
+std::atomic<bool> g_walk_after_combat{ false };           // SwitchToWalkingAfterCombat
+std::atomic<bool> g_block_interact_move{ false };         // BlockInteractMove
+std::atomic<bool> g_in_combat{ false };                   // from the game's combat events
 std::atomic<const uint8_t*> g_camera_behavior{ nullptr };  // ecl::GameCameraBehavior, for the occluders
 using CameraPitchFn = float (*)(const uint8_t* camera, bool a, bool b);
 CameraPitchFn g_camera_pitch = nullptr;  // ecl::GameCameraBehavior::GetCameraPitchDegrees
@@ -141,6 +145,12 @@ dispatch_source_t g_config_timer = nullptr;
 
 bool IsCharacterMode() { return g_mode_toggled.load() != g_mode_held.load(); }
 bool IsWalking() { return g_walking_toggled.load() != g_walking_held.load(); }
+// Character mode outside combat: no camera pan with the movement keys, no edge panning and, with
+// BlockInteractMove, no moves by clicking the ground. In combat these stay vanilla even in Character
+// mode, as on Linux, so turn-based fights stay playable.
+bool CharacterModeCameraActive() { return IsCharacterMode() && !g_in_combat.load(); }
+bool InteractMovesBlocked() { return g_block_interact_move.load() && CharacterModeCameraActive(); }
+void LogCharacterModeCamera();
 
 bool TakeLine()
 {
@@ -240,11 +250,15 @@ void LoadSettings(bool first)
     g_max_click_distance = settings.max_click_distance_behind_character;
     g_max_click_toward_camera = settings.max_click_distance_toward_camera;
     g_prevent_clicking_occluders = settings.prevent_clicking_camera_occluders;
+    g_auto_toggle_mode = settings.auto_toggle_movement_mode;
+    g_walk_after_combat = settings.walk_after_combat;
+    g_block_interact_move = settings.block_interact_move;
     camera_tweaks::Configure(settings.camera_tweaks);
     if (first) {
         g_mode_toggled = settings.is_character_movement_default;
         g_walking_toggled = settings.is_walking_default;
     }
+    LogCharacterModeCamera();  // BlockInteractMove may have changed
 }
 
 // Reloads the config about a second after it changes, on the main thread like the hotkeys. A timer
@@ -1477,6 +1491,204 @@ void OnModeChanged(bool was_character, id application, NSEvent* source)
     if (g_mode_toggles_mouselook) {
         SetMouselook(character);
     }
+    LogCharacterModeCamera();
+}
+
+// --- Combat, turn-based mode, edge panning and BlockInteractMove ------------------------------
+//
+// As on Linux (OnGameEvent in linux/src/main.cpp), the game's own analytics events tell when
+// combat and forced turn-based mode (FTB) start and end. The data of each event starts with
+// ecl::GameAnalyticsSystem::FillAllEventsData(json, name), on a game thread; the mode then changes
+// on the main thread, like a hotkey. A save loaded in the middle of a fight isn't noticed until
+// the next combat change.
+//
+// With the Character mode camera (CharacterModeCameraActive):
+// - No edge panning: ecl::CameraSystem::IsEdgePanningAllowed says no, as BlockEdgePanningHook does
+//   on Windows.
+// - With BlockInteractMove, Interact (input 4) starts no move. A click: ecl::CharacterTask_MoveTo::
+//   OnInputEvent doesn't get it. Holding the button: ecl::InputController::OnInputEvent sets its
+//   "held" byte (+0x21) for Interact, and the hook clears it right after. Windows and Linux patch
+//   those two places in the code when the mode changes; on macOS, rewriting code takes away its
+//   execute permission for a moment, which another thread could run into, so the hooks stay in
+//   place and read a flag.
+// Not ported: PreventLosingChaseCamTarget, the Windows mod's fix of a rare chase camera symptom.
+// Its target, ls::trigger::HitTest, starts with a branch and can't take an inline hook.
+
+enum class GameEvent { CombatStart, CombatEnd, FtbStart, FtbEnd };
+int64_t g_last_combat_change_ms = 0;  // main thread
+bool g_edge_panning_hooked = false;
+bool g_interact_move_hooked = false;
+
+// Logs the changes, as the Linux port does when it patches. Main thread.
+void LogCharacterModeCamera()
+{
+    static int edge_logged = -1, interact_logged = -1;
+    const int edge = CharacterModeCameraActive() ? 1 : 0;
+    if (g_edge_panning_hooked && edge != edge_logged) {
+        edge_logged = edge;
+        LOG_INFO("Edge panning %s", edge ? "blocked" : "allowed");
+    }
+    const int interact = InteractMovesBlocked() ? 1 : 0;
+    if (g_interact_move_hooked && interact != interact_logged) {
+        interact_logged = interact;
+        LOG_INFO("Interact moves %s", interact ? "blocked" : "allowed");
+    }
+}
+
+void OnGameEvent(GameEvent event)
+{
+    const int64_t now = NowMs();
+    // The game sends a combat event once per combatant, so a fight with 16 combatants starts 16
+    // times within a moment. Repeats that soon are dropped. Later ones still count: the state can
+    // be stale, e.g. after loading a save made outside combat while in combat.
+    const bool start = event == GameEvent::CombatStart;
+    const bool end = event == GameEvent::CombatEnd;
+    const bool repeat = (start && g_in_combat) || (end && !g_in_combat);
+    if (repeat && now - g_last_combat_change_ms < 2000) {
+        return;
+    }
+    const bool auto_toggle = g_auto_toggle_mode.load();
+    const bool was_character = IsCharacterMode();
+    switch (event) {
+    case GameEvent::CombatStart:
+        g_in_combat = true;
+        g_last_combat_change_ms = now;
+        LOG_INFO("Combat started");
+        if (auto_toggle) {
+            g_mode_toggled = false;
+        }
+        break;
+    case GameEvent::CombatEnd:
+        g_in_combat = false;
+        g_last_combat_change_ms = now;
+        LOG_INFO("Combat ended");
+        if (auto_toggle) {
+            g_mode_toggled = true;
+        }
+        if (g_walk_after_combat) {
+            g_walking_toggled = true;
+        }
+        break;
+    case GameEvent::FtbStart:
+        LOG_INFO("Turn-based mode started");
+        if (auto_toggle) {
+            g_mode_toggled = false;
+        }
+        break;
+    case GameEvent::FtbEnd:
+        LOG_INFO("Turn-based mode ended");
+        // Turn-based mode also ends when combat starts; don't switch back to Character mode then.
+        if (auto_toggle && now - g_last_combat_change_ms > 500) {
+            g_mode_toggled = true;
+        }
+        break;
+    }
+    OnModeChanged(was_character, NSApp, nil);
+    LogCharacterModeCamera();  // combat may have changed even if the mode didn't
+}
+
+using FillEventsFn = void (*)(const void* analytics, void* json, const char* name);
+FillEventsFn g_fill_all_events_data = nullptr;
+
+void FillAllEventsDataHook(const void* analytics, void* json, const char* name)
+{
+    struct Name {
+        const char* text;
+        GameEvent event;
+    };
+    static constexpr Name kEvents[] = { { "combat_start", GameEvent::CombatStart },
+        { "combat_end", GameEvent::CombatEnd }, { "ftb_start", GameEvent::FtbStart },
+        { "ftb_end", GameEvent::FtbEnd } };
+    for (const Name& known : kEvents) {
+        if (name && std::strcmp(name, known.text) == 0) {
+            const GameEvent event = known.event;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                OnGameEvent(event);
+            });
+            break;
+        }
+    }
+    g_fill_all_events_data(analytics, json, name);
+}
+
+using EdgePanningFn = bool (*)(const void* camera_system, const void* view);
+EdgePanningFn g_is_edge_panning_allowed = nullptr;
+
+bool EdgePanningHook(const void* camera_system, const void* view)
+{
+    if (CharacterModeCameraActive()) {
+        return false;
+    }
+    // The game's own answer, logged when it changes: it says no, for example, while the camera
+    // rotates or follows a target.
+    const bool allowed = g_is_edge_panning_allowed(camera_system, view);
+    static std::atomic<int> logged{ -1 };
+    if (logged.exchange(allowed ? 1 : 0) != (allowed ? 1 : 0)) {
+        LOG_INFO("The game %s edge panning", allowed ? "allows" : "doesn't allow");
+    }
+    return allowed;
+}
+
+// Both OnInputEvent functions return a small struct in x0, which the hooks pass on.
+using InputEventFn = uint64_t (*)(void* object, const uint8_t* event);
+InputEventFn g_move_to_input = nullptr;
+InputEventFn g_input_controller_input = nullptr;
+constexpr uint32_t kInteractInput = 4;
+
+bool IsInteract(const uint8_t* event)
+{
+    uint32_t id = 0;
+    if (event) {
+        std::memcpy(&id, event, sizeof id);
+    }
+    return id == kInteractInput;
+}
+
+uint64_t MoveToInputHook(void* task, const uint8_t* event)
+{
+    if (IsInteract(event) && InteractMovesBlocked()) {
+        return 0;  // what the game returns for every input but Interact
+    }
+    return g_move_to_input(task, event);
+}
+
+uint64_t InputControllerInputHook(void* controller, const uint8_t* event)
+{
+    const uint64_t result = g_input_controller_input(controller, event);
+    if (IsInteract(event) && InteractMovesBlocked()) {
+        static_cast<volatile uint8_t*>(controller)[0x21] = 0;  // not held
+    }
+    return result;
+}
+
+void InstallCombatAndCharacterCamera(const uintptr_t* addresses)
+{
+    const uintptr_t events = addresses[symbols::FillAllEventsData];
+    if (events && InlineHook("FillAllEventsData", events, reinterpret_cast<uintptr_t>(&FillAllEventsDataHook),
+                      reinterpret_cast<void**>(&g_fill_all_events_data))) {
+        LOG_INFO("Combat and turn-based mode events hooked (ecl::GameAnalyticsSystem::FillAllEventsData)");
+    } else {
+        LOG_WARN("Movement mode won't follow combat and turn-based mode: FillAllEventsData not hooked");
+    }
+    const uintptr_t edge = addresses[symbols::IsEdgePanningAllowed];
+    g_edge_panning_hooked = edge && InlineHook("IsEdgePanningAllowed", edge,
+        reinterpret_cast<uintptr_t>(&EdgePanningHook), reinterpret_cast<void**>(&g_is_edge_panning_allowed));
+    if (!g_edge_panning_hooked) {
+        LOG_WARN("Edge panning unchanged in Character mode: IsEdgePanningAllowed not hooked");
+    }
+    const uintptr_t move_to = addresses[symbols::MoveToOnInputEvent];
+    const uintptr_t controller = addresses[symbols::InputControllerOnInputEvent];
+    g_interact_move_hooked = move_to && controller &&
+        InlineHook("CharacterTask_MoveTo::OnInputEvent", move_to, reinterpret_cast<uintptr_t>(&MoveToInputHook),
+            reinterpret_cast<void**>(&g_move_to_input)) &&
+        InlineHook("InputController::OnInputEvent", controller,
+            reinterpret_cast<uintptr_t>(&InputControllerInputHook), reinterpret_cast<void**>(&g_input_controller_input));
+    if (g_interact_move_hooked) {
+        LOG_INFO("BlockInteractMove: click and hold hooked, %s", g_block_interact_move ? "on" : "off in the config");
+    } else {
+        LOG_WARN("BlockInteractMove unavailable: the input hooks failed");
+    }
+    LogCharacterModeCamera();
 }
 
 // A hotkey's key went down or up; `key` is already in hotkeys' state. Returns true if the game
@@ -1815,6 +2027,7 @@ void Run()
     // The tweaks first: with the pitch update hooked, the occluders take their camera from it.
     InstallCameraTweaks(image, addresses, slide);
     InstallOccluderHooks(addresses);
+    InstallCombatAndCharacterCamera(addresses);
 
     if (SwizzleSendEvent()) {
         LOG_INFO("Hotkeys enabled (-[BG3Application sendEvent:])");
@@ -1978,7 +2191,7 @@ extern "C" void ObserveCameraInput(void* self, const void* entity, const uint8_t
     // 0, as ExecuteCameraCommandHook does on Windows and on Linux.
     uint32_t action;
     std::memcpy(&action, event, sizeof action);
-    if (action >= kFirstCameraMove && action <= kLastCameraMove && IsCharacterMode()) {
+    if (action >= kFirstCameraMove && action <= kLastCameraMove && CharacterModeCameraActive()) {
         const uint32_t none = 0;
         std::memcpy(const_cast<uint8_t*>(event), &none, sizeof none);
         static std::atomic<int> blocked{ 0 };

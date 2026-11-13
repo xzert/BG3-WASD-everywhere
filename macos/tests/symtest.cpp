@@ -267,7 +267,9 @@ bool CheckSlice(const std::vector<uint8_t>& file, uint32_t cputype, const char* 
         for (int index : { int(symbols::GetRotatedInput), int(symbols::AddForcedMouseCursor),
                  int(symbols::RemoveForcedMouseCursor), int(symbols::RecordDialogStart),
                  int(symbols::RecordDialogEnd), int(symbols::IsFading), int(symbols::OnSelectedCharacterChanged),
-                 int(symbols::CalcCamTargetDest),
+                 int(symbols::CalcCamTargetDest), int(symbols::FillAllEventsData),
+                 int(symbols::IsEdgePanningAllowed), int(symbols::MoveToOnInputEvent),
+                 int(symbols::InputControllerOnInputEvent),
                  int(symbols::GetInputValue), int(symbols::OnIsGameMenuOpenChanged) }) {
             const uint64_t at = macho::FileOffset(image.header, addresses[index]);
             uint32_t words[4] = {};
@@ -283,7 +285,9 @@ bool CheckSlice(const std::vector<uint8_t>& file, uint32_t cputype, const char* 
             if (index == symbols::GetRotatedInput || index == symbols::AddForcedMouseCursor ||
                 index == symbols::RemoveForcedMouseCursor || index == symbols::RecordDialogStart ||
                 index == symbols::RecordDialogEnd || index == symbols::IsFading ||
-                index == symbols::OnSelectedCharacterChanged || index == symbols::CalcCamTargetDest) {
+                index == symbols::OnSelectedCharacterChanged || index == symbols::CalcCamTargetDest ||
+                index == symbols::FillAllEventsData || index == symbols::IsEdgePanningAllowed ||
+                index == symbols::MoveToOnInputEvent || index == symbols::InputControllerOnInputEvent) {
                 ok = ok && movable;
             }
         }

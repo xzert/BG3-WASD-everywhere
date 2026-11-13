@@ -114,15 +114,45 @@ public:
 };
 }  // namespace ecl
 
+namespace json {
+class Value {
+public:
+    int fields = 0;
+};
+}  // namespace json
+
 namespace ecl {
 struct Character;
-// Records the start and end of each dialog the player's character joins.
+// Records the start and end of each dialog the player's character joins, and fills the data of
+// every analytics event, such as combat_start.
 class GameAnalyticsSystem {
 public:
     void RecordDialogStart(const Character* character, const char* dialog, const ls::STDString& name, bool flag) const;
     void RecordDialogEnd(const Character* character, const ls::FixedString& dialog, const ls::STDString& name, bool flag) const;
+    void FillAllEventsData(json::Value& data, const char* name) const;
+};
+
+// A click on the ground: Interact (4) starts a move.
+class CharacterTask_MoveTo {
+public:
+    uint16_t OnInputEvent(const ls::InputEvent& event);
+
+    int moves = 0;
+};
+
+// Interact pressed sets the "held" byte at +0x21.
+class InputController {
+public:
+    uint16_t OnInputEvent(const ls::InputEvent& event);
+
+    uint8_t bytes[0x30] = {};
 };
 }  // namespace ecl
+
+// ecl::CameraSystem::IsEdgePanningAllowed(EntityView<...> const&) const, under the game's name.
+bool StandinIsEdgePanningAllowed(const ecl::CameraSystem* system, const void* view) __asm__(
+    "__ZNK3ecl12CameraSystem20IsEdgePanningAllowedERKN3ecs8_private10EntityViewIJN2ls8TypeListIJKNS_17EocCamera"
+    "BehaviorEKNS_18GameCameraBehaviorEEEENS5_IJKNS_6camera23PlatformTargetComponentEEEEEEE");
 
 // The game's cursor position is the first two floats gCore points to; -[LSMTLView mouseMoved:]
 // writes it.
@@ -158,7 +188,9 @@ constexpr const char* kConfigFormat = "[ModHotkeys]\n"
                                       "ToggleCameraRotation = \"key:g\"\n"
                                       "MouselookPauseKeys = \"key:i\"\n"
                                       "[Walking]\n"
-                                      "WalkSpeed = %s\n";
+                                      "WalkSpeed = %s\n"
+                                      "[Misc]\n"
+                                      "BlockInteractMove = true\n";
 
 // macOS virtual key codes (kVK_*).
 constexpr unsigned short kW = 0x0D, kS = 0x01, kR = 0x0F, kT = 0x11, kY = 0x10, kF5 = 0x60;
@@ -181,6 +213,8 @@ Received g_received[kMaxReceived];
 int g_events = 0;
 int g_other_downs = 0, g_other_ups = 0;  // middle mouse button presses and releases the game got
 int g_dialog_records = 0;
+int g_events_filled = 0;
+int g_edge_panning_asked = 0;
 // While set, the stand-in plays the game's camera: the middle button down shows its rotation cursor.
 ecl::CursorControl* g_simulated_camera = nullptr;
 
@@ -260,6 +294,36 @@ void ecl::GameAnalyticsSystem::RecordDialogStart(const Character*, const char*, 
 void ecl::GameAnalyticsSystem::RecordDialogEnd(const Character*, const ls::FixedString&, const ls::STDString&, bool) const
 {
     ++g_dialog_records;
+}
+
+void ecl::GameAnalyticsSystem::FillAllEventsData(json::Value& data, const char* name) const
+{
+    data.fields += name ? 1 : 0;
+    ++g_events_filled;
+}
+
+uint16_t ecl::CharacterTask_MoveTo::OnInputEvent(const ls::InputEvent& event)
+{
+    if (event.id == 4) {
+        ++moves;
+    }
+    return 0;
+}
+
+uint16_t ecl::InputController::OnInputEvent(const ls::InputEvent& event)
+{
+    if (event.id == 4) {
+        bytes[0x21] = 1;
+    }
+    return 0x101;
+}
+
+bool StandinIsEdgePanningAllowed(const ecl::CameraSystem* system, const void* view)
+{
+    // The counter afterwards: its adrp mustn't be among the 4 instructions an inline hook moves.
+    const bool allowed = system && view;
+    ++g_edge_panning_asked;
+    return allowed;
 }
 
 @interface BG3Application : NSApplication
@@ -686,6 +750,68 @@ int main(int argc, char** argv)
         modifiers(kCapsLock, NSEventModifierFlagCapsLock);
         if (!pick(0x1234)) {
             std::printf("unclickable character: not skipped back in Character mode\n");
+            ++failures;
+        }
+
+        // Character mode outside combat: no edge panning, and BlockInteractMove (on in the test config)
+        // keeps Interact from starting a move, by a click or by holding it.
+        ecl::CharacterTask_MoveTo move_to;
+        ecl::InputController controller;
+        const int edge_asked = g_edge_panning_asked;
+        auto check_character_camera = [&](bool active, const char* step) {
+            const bool edge = StandinIsEdgePanningAllowed(camera, &entity);
+            const int moves = move_to.moves;
+            const ls::InputEvent interact{ 4, 1, 1.0f }, other{ 5, 1, 1.0f };
+            move_to.OnInputEvent(other);
+            const uint16_t moved = move_to.OnInputEvent(interact);
+            controller.bytes[0x21] = 0;
+            const uint16_t held = controller.OnInputEvent(interact);
+            if (edge == active || move_to.moves - moves != (active ? 0 : 1) || moved != 0 ||
+                controller.bytes[0x21] != (active ? 0 : 1) || held != 0x101) {
+                std::printf("%s: edge panning %s, %d moves, held byte %d, results %u %#x\n", step,
+                    edge ? "allowed" : "blocked", move_to.moves - moves, controller.bytes[0x21], moved, held);
+                ++failures;
+            }
+        };
+        check_character_camera(true, "Character mode");
+        if (g_edge_panning_asked - edge_asked != 0) {
+            std::printf("IsEdgePanningAllowed reached the game in Character mode\n");
+            ++failures;
+        }
+
+        // Combat starts: Camera mode (AutoToggleMovementMode is on by default), everything vanilla.
+        const int combat_events = g_events;
+        json::Value data;
+        analytics.FillAllEventsData(data, "combat_start");
+        analytics.FillAllEventsData(data, "combat_start");  // the next combatant
+        run(0.2);
+        check_movement(0.0f, "combat started");
+        check_character_camera(false, "combat started");
+        // Character mode in combat: WASD moves the character, the rest stays vanilla.
+        modifiers(kCapsLock, 0);
+        check_movement(1.0f, "Character mode in combat");
+        check_camera(false, "Character mode in combat");
+        check_character_camera(false, "Character mode in combat");
+        modifiers(kCapsLock, NSEventModifierFlagCapsLock);
+        analytics.FillAllEventsData(data, "combat_end");
+        run(0.2);
+        check_movement(1.0f, "combat ended");
+        check_character_camera(true, "combat ended");
+        // Turn-based mode outside combat.
+        run(0.4);
+        analytics.FillAllEventsData(data, "ftb_start");
+        run(0.2);
+        check_movement(0.0f, "turn-based mode");
+        analytics.FillAllEventsData(data, "ftb_end");
+        analytics.FillAllEventsData(data, "level_up");
+        run(0.2);
+        check_movement(1.0f, "turn-based mode ended");
+        if (g_events_filled != 6 || data.fields != 6) {
+            std::printf("FillAllEventsData reached the game %d times, not 6\n", g_events_filled);
+            ++failures;
+        }
+        if (g_events - combat_events != 2) {
+            std::printf("combat: sendEvent: reached the game %d times, not 2\n", g_events - combat_events);
             ++failures;
         }
 

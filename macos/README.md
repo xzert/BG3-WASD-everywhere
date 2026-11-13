@@ -8,12 +8,13 @@ An early port for the native macOS game on Apple Silicon. Supported game version
   runs its gamepad movement task (`ecl::CharacterTask_MoveController`) only while its
   controller-mode flag is set; the library turns that check into a `nop`.
 - Hotkeys and settings come from `bg3-wasd-everywhere.toml` next to the library, as on Linux. The
-  config is reloaded about a second after you save it. The macOS config has only the settings the
-  port supports so far; the others are ignored.
+  config is reloaded about a second after you save it. It has the same keys as the Linux config.
 - `ToggleMovementMode` (Caps Lock) and `HoldMovementMode` switch between Character and Camera
   movement mode.
-  - In Character mode, the movement keys don't pan the camera: the camera movement actions (ids 99
-    to 102) reach `ecl::CameraSystem::OnInputEvent` with id 0.
+  - In Character mode outside combat, the movement keys don't pan the camera: the camera movement
+    actions (ids 99 to 102) reach `ecl::CameraSystem::OnInputEvent` with id 0. Edge panning is off
+    too: `ecl::CameraSystem::IsEdgePanningAllowed` says no, as `BlockEdgePanningHook` does on
+    Windows.
   - In Camera mode they only pan it: `GetRotatedInput`, the movement input of the movement task, is
     hooked and returns no movement. A gamepad keeps working as without the mod.
 - `ToggleAutoforward` (Shift+W) toggles autoforward in Character mode. The game gets a key-down of
@@ -91,14 +92,28 @@ An early port for the native macOS game on Apple Silicon. Supported game version
 
   Not ported, as on Linux: the gamepad settings, the floor check and keeping the zoom on a zone
   change.
+- `AutoToggleMovementMode`: Camera mode when combat or turn-based mode (FTB) starts, Character mode
+  when it ends, as on Linux. The game's own analytics events tell when: the library hooks
+  `ecl::GameAnalyticsSystem::FillAllEventsData(json, name)`, which starts the data of every event,
+  and looks for `combat_start`, `combat_end`, `ftb_start` and `ftb_end`. A save loaded in the
+  middle of a fight isn't noticed until the next combat change. `SwitchToWalkingAfterCombat` works
+  too.
+- `BlockInteractMove` (off by default): in Character mode outside combat, clicking or holding
+  Interact (the left button) on the ground doesn't move the character. As on Linux, combat stays
+  vanilla even in Character mode, so turn-based fights stay playable.
+  - A click: `ecl::CharacterTask_MoveTo::OnInputEvent` doesn't get Interact.
+  - Holding: `ecl::InputController::OnInputEvent` sets its "held" byte (+0x21) for Interact, and the
+    hook clears it right after.
+  - Windows and Linux patch those two places in the game code whenever the mode changes. On macOS,
+    rewriting code takes away its execute permission for a moment, and another game thread could
+    run into that, so these inline hooks stay in place and read a flag.
+- Not ported: Windows' `PreventLosingChaseCamTargetHook`, a fix of a rare chase camera symptom. Its
+  target, `ls::trigger::HitTest`, starts with a branch, so it can't take an inline hook.
 - The movement keys are bound in `inputconfig_p1.json` of every player profile in
   `~/Documents/Larian Studios/Baldur's Gate 3/PlayerProfiles/`. It uses the same patcher as the Linux
   port, and keeps the original as `inputconfig_p1.json.bg3-wasd-everywhere.bak` before changing it.
 - The macOS game keeps its function names, so the library finds code by name instead of byte
   signatures, then finds the instructions it patches by their pattern (`src/patterns.cpp`).
-
-Not yet: Camera mode in combat, edge panning, turn-based mode and the other features of the Linux
-port.
 
 The library also logs what the next steps need:
 - the raw camera input events, through the `ecl::CameraSystem::OnInputEvent` vtable slot;
