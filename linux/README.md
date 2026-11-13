@@ -119,7 +119,8 @@ an error and stays inactive.
 ## Not ported yet
 
 - From the camera rotation features:
-  - mouselook doesn't pause by itself for the loot window and photo mode;
+  - mouselook doesn't pause by itself for photo mode; if you open it with a key, add the key to
+    `MouselookPauseKeys`;
   - the crosshair icon for `centered`.
 - Hotkeys still work while menus are open. They are ignored only while you type into a text field.
 - From the camera tweaks: the gamepad settings, the floor check and keeping the zoom on a zone
@@ -131,9 +132,14 @@ an error and stays inactive.
   character's shape for picking ends around the eyes, so the game takes the click for the ground
   behind them, and `MaxClickDistanceBehindCharacter` doesn't apply.
 - With the game's Edge Panning option on, moving the cursor to the screen edge doesn't pan the camera
-  in Camera mode either. In that mode the mod has restored the game's original code (the log shows
-  `Edge panning allowed (code now 0f 85)`), so the cause is elsewhere and not yet known. Panning with
-  the movement keys works.
+  in Camera mode either. The game itself doesn't allow it there: in that mode the mod has restored
+  the game's original code (the log shows `Edge panning allowed (code now 0f 85)`), and on macOS,
+  where the mod asks the game's `IsEdgePanningAllowed` and passes the answer on, the game says no.
+  Panning with the movement keys works.
+- Mouselook interrupted by an NPC's dialog (not properly tested). While mouselook is on, the
+  cursor picks nothing, so you turn it off before you click a chest or a trader yourself. A dialog
+  that an NPC starts pauses it, and mouselook comes back when the dialog ends, even if the dialog
+  opened a trade or loot window. Press the mouselook key to turn it off.
 
 ## Build
 

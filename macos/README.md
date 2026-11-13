@@ -14,7 +14,8 @@ An early port for the native macOS game on Apple Silicon. Supported game version
   - In Character mode outside combat, the movement keys don't pan the camera: the camera movement
     actions (ids 99 to 102) reach `ecl::CameraSystem::OnInputEvent` with id 0. Edge panning is off
     too: `ecl::CameraSystem::IsEdgePanningAllowed` says no, as `BlockEdgePanningHook` does on
-    Windows.
+    Windows. In Camera mode the hook passes the game's own answer on, and the game doesn't allow
+    edge panning there either (the log says `The game doesn't allow edge panning`), as on Linux.
   - In Camera mode they only pan it: `GetRotatedInput`, the movement input of the movement task, is
     hooked and returns no movement. A gamepad keeps working as without the mod.
 - `ToggleAutoforward` (Shift+W) toggles autoforward in Character mode. The game gets a key-down of

@@ -89,7 +89,8 @@ Notes on the Linux column:
   - Panels such as the inventory, map or journal pause it when you open them with their hotkeys
     (`MouselookPauseKeys`).
   - Mouselook resumes when you close the panel with the same key or Esc, or press the mouselook key.
-  - The loot window and photo mode aren't detected.
+  - Not properly tested: when a dialog that an NPC started ends with a trade or loot window,
+    mouselook comes back over it; press the mouselook key. Photo mode isn't detected.
 - ³ Bound when the game starts. If you rebind the camera keys in the game's menu, restart the game
   to apply them to movement.
 - ⁴ Combat is detected from the game's combat start and end events. If you load a save in the
@@ -116,6 +117,8 @@ Notes on the macOS column:
 - ⁵ The active character and camera occluders (`PreventClickingCameraOccluders`).
 - ⁶ As on Linux.
 - ⁸ Without Windows' fix of a rare chase camera symptom (`PreventLosingChaseCamTargetHook`).
+- On Linux and macOS, edge panning doesn't work in Camera mode either: the game itself doesn't allow
+  it there, with the mod not involved.
 - The config has the same keys as on Linux. On a Mac keyboard, `alt` is Option and `gui` is
   Command.
 
