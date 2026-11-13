@@ -273,6 +273,13 @@ bool FindInteractMoveAddresses(const uint8_t* text, size_t size, uintptr_t text_
     }
     out.click_move_je = text_address + click[0] + 3;
     out.hold_move_flag = text_address + hold[0] + 16;
+    // The prologue, then the event's +0x1C and id, the character from this+0x08/+0x10 and its +0x12C.
+    const auto entry = FindPattern(text, size,
+        "55 41 57 41 56 41 55 41 54 53 48 83 EC 28 48 89 FB 8A 46 1C 49 89 F6 44 8B 2E 48 8B 7F 08 48 8B 73 10 "
+        "88 44 24 0F E8 ?? ?? ?? ?? 8B 80 2C 01 00 00 48 8B 7B 50");
+    if (entry.size() == 1 && entry[0] < hold[0] && hold[0] - entry[0] < 0x200) {
+        out.input_controller_entry = text_address + entry[0];
+    }
     return true;
 }
 

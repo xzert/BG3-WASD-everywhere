@@ -71,6 +71,7 @@ struct Settings {
     float max_click_distance_toward_camera = 0.6f;     // meters
     bool prevent_clicking_camera_occluders = false;
     bool block_interact_move = false;
+    bool debug_log = false;  // DebugLog: the mod's per-action decisions go to the log too
     CameraTweakSettings camera_tweaks;
 };
 

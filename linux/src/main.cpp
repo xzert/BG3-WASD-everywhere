@@ -420,9 +420,9 @@ bool PickingIsFadingHook(uint64_t entity, const void* view, int flag)
     const int decision = !measured ? 0 : skip ? 1 : 2;
     if (last_state.exchange(decision) != decision) {
         if (!measured) {
-            LOG_INFO("Active character skipped by picking (no picking ray or camera to measure)");
+            LOG_DEBUG("Active character skipped by picking (no picking ray or camera to measure)");
         } else {
-            LOG_INFO("Active character %s: the ray reaches the ground %.1f m behind it, limit %.1f "
+            LOG_DEBUG("Active character %s: the ray reaches the ground %.1f m behind it, limit %.1f "
                      "(camera %.1f m above the feet, camera root %.2f m above them)",
                 skip ? "skipped by picking" : "kept clickable", m.behind, limit, t_picking_ray.start[1] - m.feet,
                 m.offset);
@@ -438,7 +438,7 @@ RegisterPair SelectedCharacterHook(uint64_t self, uint64_t player, uint64_t char
     if (character) {
         const uint64_t handle = *reinterpret_cast<const uint64_t*>(character);
         if (GetState().active_character.exchange(handle) != handle) {
-            LOG_INFO("Active character %#llx (player %d)", static_cast<unsigned long long>(handle),
+            LOG_DEBUG("Active character %#llx (player %d)", static_cast<unsigned long long>(handle),
                 static_cast<int>(static_cast<int16_t>(player)));
         }
     }
@@ -759,7 +759,7 @@ extern "C" __attribute__((visibility("hidden"), used, noinline, noipa)) const fl
     static std::atomic<int> last_state{ -1 };
     const int decision = !camera ? 0 : move ? 1 : 2;
     if (last_state.exchange(decision) != decision) {
-        LOG_INFO("Picking ray %s (zoom %.1f, pitch %.1f, ray %.1f)",
+        LOG_DEBUG("Picking ray %s (zoom %.1f, pitch %.1f, ray %.1f)",
             !camera ? "kept: no camera yet" : move ? "moved past camera occluders" : "kept: camera exception",
             zoom, pitch, length);
     }
@@ -801,7 +801,7 @@ extern "C" __attribute__((visibility("hidden"), used, noinline, noipa)) const fl
         } else if (result == picking::WalkableRay::NotTowardCharacter) {
             what = "kept: it doesn't head toward the character";
         }
-        LOG_INFO("Walkable ray %s", what);
+        LOG_DEBUG("Walkable ray %s", what);
     }
     const bool changed = result == picking::WalkableRay::Moved || result == picking::WalkableRay::Cancelled;
     return changed ? moved : start;

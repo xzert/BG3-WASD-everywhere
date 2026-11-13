@@ -1,4 +1,4 @@
-# BG3 WASD Everywhere for macOS: prototype
+# BG3 WASD Everywhere for macOS
 
 An early port for the native macOS game on Apple Silicon. Supported game version: 4.1.1.7631656.
 
@@ -99,6 +99,9 @@ An early port for the native macOS game on Apple Silicon. Supported game version
   and looks for `combat_start`, `combat_end`, `ftb_start` and `ftb_end`. A save loaded in the
   middle of a fight isn't noticed until the next combat change. `SwitchToWalkingAfterCombat` works
   too.
+- A movement key stops a click move in Character mode outside combat, as on Linux: the hook of
+  `ecl::InputController::OnInputEvent` passes the game an `ActionCancel` release before the first
+  movement key goes down.
 - `BlockInteractMove` (off by default): in Character mode outside combat, clicking or holding
   Interact (the left button) on the ground doesn't move the character. As on Linux, combat stays
   vanilla even in Character mode, so turn-based fights stay playable.
@@ -119,9 +122,9 @@ An early port for the native macOS game on Apple Silicon. Supported game version
 - The macOS game keeps its function names, so the library finds code by name instead of byte
   signatures, then finds the instructions it patches by their pattern (`src/patterns.cpp`).
 
-The library also logs what the next steps need:
-- the raw camera input events, through the `ecl::CameraSystem::OnInputEvent` vtable slot;
-- key and mouse button events, through a swizzled `-[BG3Application sendEvent:]`.
+The log has the startup, the settings and mode changes. With `DebugLog = true` in the config, it
+also gets each decision of the library (clicks, camera rotation, the cursor, mouselook pauses), the
+symbol addresses, the raw camera input events and the key and mouse button events it sees.
 
 ## Build
 
@@ -136,6 +139,15 @@ make
 This builds `build/libbg3-wasd-everywhere.dylib` (arm64), `build/bg3-wasd-everywhere-launch` and
 `build/symtest`. It also copies the default config to `build/bg3-wasd-everywhere.toml`, only once, so
 your edits to it survive rebuilds.
+
+To build the release archive `dist/bg3-wasd-everywhere-macos-<version>.tar.gz`:
+
+```bash
+./release.sh
+```
+
+It builds in `dist/.build` without debug info, runs `make check`, strips the library and the
+launcher, signs them ad hoc and packs them with the default config, `INSTALL.md` and `LICENSE`.
 
 ## Check
 

@@ -187,8 +187,12 @@ int main(int argc, char** argv)
         std::printf("FAILED (BlockInteractMove): %s\n", error.c_str());
         ++failures;
     } else {
-        std::printf("Interact move         click check %#lx, hold flag %#lx\n", Hex(interact.click_move_je),
-            Hex(interact.hold_move_flag));
+        std::printf("Interact move         click check %#lx, hold flag %#lx, InputController %#lx\n",
+            Hex(interact.click_move_je), Hex(interact.hold_move_flag), Hex(interact.input_controller_entry));
+        if (!interact.input_controller_entry) {
+            std::printf("FAILED (click move cancel): InputController::OnInputEvent not found\n");
+            ++failures;
+        }
     }
 
     wasd::CameraTweakAddresses tweaks;

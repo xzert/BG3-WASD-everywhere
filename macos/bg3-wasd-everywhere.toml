@@ -277,6 +277,15 @@ KeyboardCameraRotationMult = 2.0
 # Speed of the camera rotation with the keys. 1.0 is vanilla.
 
 
+[Debug]
+
+DebugLog = false
+# Also write every decision of the mod to the log: each click the unclickable character or the
+# camera occluders change, camera rotation, the cursor, mouselook pauses. Turn it on to report a
+# bug. Startup, settings and mode changes are always logged.
+# [true, false]
+
+
 # List of all available keys for mod hotkeys:
 
 # Modifiers: ctrl, shift, alt (Option). E.g. "ctrl+shift+key:w"

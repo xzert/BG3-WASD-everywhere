@@ -26,7 +26,7 @@ went by, and the Hour Came: everything works on Linux again (and on macOS too).
 ## About
 
 Direct character movement with WASD (or other keys) for Baldur's Gate 3: on Windows, on the native
-Linux build of the game and, as an early prototype, on the native macOS build for Apple Silicon.
+Linux build of the game and on the native macOS build for Apple Silicon.
 
 This is a fork of [BG3WASD](https://github.com/Ch4nKyy/BG3WASD) by Ch4nKyy
 ([Nexus Mods](https://www.nexusmods.com/baldursgate3/mods/781)). The Windows mod here is the
@@ -36,7 +36,7 @@ The fork adds a port for the native Linux version of the game. Larian released t
 September 2025 (Hotfix #34), and Steam runs it inside the Steam Linux Runtime. The Windows DLL can't
 load there, so the port is a separate `LD_PRELOAD` library in [`linux/`](linux/).
 
-The fork also starts a port for the native macOS version on Apple Silicon, in [`macos/`](macos/).
+The fork also adds a port for the native macOS version on Apple Silicon, in [`macos/`](macos/).
 It is a library that a small launcher loads into the game when Steam starts it.
 
 The Linux and macOS ports also include the camera tweaks of
@@ -50,7 +50,7 @@ players use together with BG3WASD: a free camera pitch, wider zoom limits, FOV a
 | Windows | The original mod from [Nexus Mods](https://www.nexusmods.com/baldursgate3/mods/781) |
 | Linux, game running through Proton (`bin/bg3.exe`) | The original mod with Native Mod Loader. Launch options: `WINEDLLOVERRIDES="bink2w64=n,b" %command%` |
 | Linux, native game (`bin/bg3`, no `.exe`) | The Linux port from this repository |
-| macOS on Apple Silicon | The early macOS port from this repository; build it yourself, see [Install on macOS](#install-on-macos) |
+| macOS on Apple Silicon | The macOS port from this repository |
 
 To find out which build you have, look in `Baldurs Gate 3/bin`. A `bg3` file without an extension
 means the native Linux build.
@@ -58,7 +58,7 @@ means the native Linux build.
 ## Multiplatform port
 
 The Windows version is the original mod. The Linux and macOS versions are separate ports in
-[`linux/`](linux/) and [`macos/`](macos/); the macOS one is an early prototype.
+[`linux/`](linux/) and [`macos/`](macos/), released together with the same version number.
 
 Both ports support game version **4.1.1.7631656** (Hotfix #36).
 - The Linux port finds the game's code by byte signatures. On any other version it finds nothing,
@@ -75,6 +75,7 @@ Both ports support game version **4.1.1.7631656** (Hotfix #36).
 | Rotation turns off in menus, dialogs, loot and photo mode | ✅ | ✅ ² | ✅ ² |
 | No edge panning in Character mode | ✅ | ✅ | ✅ |
 | Rotate + left click moves forward | ✅ | ✅ | ✅ |
+| A movement key stops a click move in Character mode | ✅ | ✅ | ✅ |
 | Unclickable active character and camera occluders | ✅ | ✅ ⁵ | ✅ ⁵ |
 | Camera tweaks: free pitch, zoom limits, FOV, offsets ([Native Camera Tweaks](https://www.nexusmods.com/baldursgate3/mods/945)) | separate mod | ✅ ⁶ | ✅ ⁶ |
 | Blocking click-to-move (`BlockInteractMove`) | ✅ | ✅ ⁷ | ✅ ⁷ |
@@ -155,34 +156,39 @@ More details, including how the port finds its way around the game's code, are i
 
 ### Install on macOS
 
-The macOS port is an early prototype for Apple Silicon Macs, without prebuilt releases yet.
+For Apple Silicon Macs.
 
-1. Install the Xcode Command Line Tools (`xcode-select --install`), get this repository into a
-   folder whose path has no spaces, and build:
+1. Download `bg3-wasd-everywhere-macos-<version>.tar.gz` from
+   [Releases](https://github.com/xzert/BG3-WASD-everywhere/releases) and extract it to a folder whose
+   path has no spaces, for example `~/bg3-wasd-everywhere`.
+2. The files are not notarized by Apple, so remove the download mark in Terminal, with your path:
 
    ```bash
-   cd macos && make
+   xattr -dr com.apple.quarantine ~/bg3-wasd-everywhere
    ```
 
-2. In Steam, open Baldur's Gate 3 → Properties → General → Launch Options and enter, with your
+3. In Steam, open Baldur's Gate 3 → Properties → General → Launch Options and enter, with your
    path:
 
    ```
-   /Users/you/BG3-WASD-everywhere/macos/build/bg3-wasd-everywhere-launch %command%
+   /Users/you/bg3-wasd-everywhere/bg3-wasd-everywhere-launch %command%
    ```
 
-3. Start the game with Play. On the first start, macOS asks whether Steam may access the Documents
+4. Start the game with Play. On the first start, macOS asks whether Steam may access the Documents
    folder. Allow it: the game keeps its profiles and saves there.
 
-The log is `~/Library/Logs/bg3-wasd-everywhere/bg3-wasd-everywhere.log`. Caps Lock switches between
-Character and Camera movement, and Shift+W toggles autoforward. Hotkeys, walking speed and the
-rotation cursor are set in `macos/build/bg3-wasd-everywhere.toml`, next to the library. More details,
-including why Steam needs the launcher, are in [macos/README.md](macos/README.md).
+The archive also contains these steps in `INSTALL.md`. The log is
+`~/Library/Logs/bg3-wasd-everywhere/bg3-wasd-everywhere.log`. Caps Lock switches between Character
+and Camera movement, and Shift+W toggles autoforward. Hotkeys, walking speed and the rotation cursor
+are set in `bg3-wasd-everywhere.toml` next to the library.
+
+To build from source instead, run `make` in `macos/` with the Xcode Command Line Tools and use
+`macos/build/bg3-wasd-everywhere-launch` in the launch options. More details, including why Steam
+needs the launcher, are in [macos/README.md](macos/README.md).
 
 ## Roadmap
 
-1. Finish the Linux port: everything marked "—" in the Linux column above.
-2. Finish the macOS port: a release build.
+1. Keep both ports working with new game versions.
 
 ## Building the Windows version
 

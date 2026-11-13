@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "log.hpp"
+#include "move_cancel.hpp"
 #include "signatures.hpp"
 #include "state.hpp"
 
@@ -156,7 +157,7 @@ void OnRotationStart()
     if (!was_rotating) {
         // Rotation starts right after its key or button press reaches the game.
         g_rotation.trigger = g_rotation.last_press;
-        LOG_INFO("Rotation start (%s %d), cursor saved at %d,%d", g_rotation.trigger.mouse_button ? "mouse" : "key",
+        LOG_DEBUG("Rotation start (%s %d), cursor saved at %d,%d", g_rotation.trigger.mouse_button ? "mouse" : "key",
             g_rotation.trigger.code, g_rotation.restore.x, g_rotation.restore.y);
     }
 }
@@ -172,7 +173,7 @@ void EndRotation(const char* reason)
     if (g_rotation.restore.x != -1) {  // skip the pop the game does on startup
         g_rotation.should_override_cursor = false;
     }
-    LOG_INFO("Rotation end: %s", reason);
+    LOG_DEBUG("Rotation end: %s", reason);
 }
 
 // CameraRotationOffHook
@@ -314,9 +315,9 @@ void UpdateMouselook()
     const char* reason = g_mouselook_on ? MouselookPauseReason() : nullptr;
     if (reason != last_reason) {
         if (reason) {
-            LOG_INFO("Mouselook paused: %s", reason);
+            LOG_DEBUG("Mouselook paused: %s", reason);
         } else if (g_mouselook_on) {
-            LOG_INFO("Mouselook resumed");
+            LOG_DEBUG("Mouselook resumed");
         }
         last_reason = reason;
     }
@@ -373,6 +374,24 @@ bool CharacterModeCameraActive()
 {
     const State& state = GetState();
     return state.IsCharacterMovementMode() && !state.in_combat;
+}
+
+// A movement key cancels a click move (move_cancel.hpp). The hook runs on the game thread only.
+using InputEventFn = uint64_t (*)(void* controller, const uint8_t* event);
+constexpr uint8_t kInputControllerEntry[] = { 0x55, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54, 0x53, 0x48,
+    0x83, 0xEC, 0x28 };
+InputEventFn g_input_controller_input = nullptr;
+uint8_t g_held_directions = 0;
+
+uint64_t InputControllerInputHook(void* controller, const uint8_t* event)
+{
+    if (move_cancel::FirstMovementPress(event, g_held_directions) && CharacterModeCameraActive()) {
+        alignas(8) uint8_t cancel[64] = {};
+        move_cancel::MakeCancelRelease(event, cancel);
+        g_input_controller_input(controller, cancel);
+        LOG_DEBUG("Movement key down: click move cancelled");
+    }
+    return g_input_controller_input(controller, event);
 }
 
 // PreventLosingChaseCamTargetHook: report "not inside" in Character mode, like the Windows mod.
@@ -467,8 +486,17 @@ bool InstallInteractMoveBlocker(const mem::MainExecutable& exe)
     std::string error;
     if (!FindInteractMoveAddresses(reinterpret_cast<const uint8_t*>(exe.code.start), exe.code.size, exe.code.start,
             addresses, error)) {
-        LOG_WARN("BlockInteractMove unavailable: %s", error.c_str());
+        LOG_WARN("BlockInteractMove unavailable, movement keys don't cancel click moves: %s", error.c_str());
         return false;
+    }
+    const uintptr_t entry = addresses.input_controller_entry;
+    if (entry && mem::HookEntry(entry, kInputControllerEntry, sizeof kInputControllerEntry,
+                     reinterpret_cast<const void*>(&InputControllerInputHook),
+                     reinterpret_cast<void**>(&g_input_controller_input))) {
+        LOG_INFO("Movement keys cancel click moves: InputController::OnInputEvent %#lx hooked", file_address(entry));
+    } else {
+        LOG_WARN("Movement keys don't cancel click moves: InputController::OnInputEvent %s",
+            entry ? "not hooked" : "not found");
     }
     uint16_t click, hold;
     std::memcpy(&click, reinterpret_cast<const void*>(addresses.click_move_je), sizeof click);
@@ -589,7 +617,7 @@ void OnFrameStart()
         if (window) {
             g_sdl.WarpMouseInWindow(window, g_rotation.restore.x, g_rotation.restore.y);
         }
-        LOG_INFO("Cursor restored at %d,%d%s", g_rotation.restore.x, g_rotation.restore.y,
+        LOG_DEBUG("Cursor restored at %d,%d%s", g_rotation.restore.x, g_rotation.restore.y,
             window ? "" : " (no window to warp in)");
         g_sdl.SetRelativeMouseMode(0);
         g_rotation.virtual_cursor = VirtualCursor::EndOverride;

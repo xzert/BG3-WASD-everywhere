@@ -99,8 +99,10 @@ void ReloadSettings()
 {
     Settings settings;
     const std::string& path = SettingsPath();
-    if (ParseSettingsFile(path, settings)) {
-        LOG_INFO("Config loaded from %s", path.c_str());
+    const bool parsed = ParseSettingsFile(path, settings);
+    log::SetDebug(settings.debug_log);
+    if (parsed) {
+        LOG_INFO("Config loaded from %s%s", path.c_str(), settings.debug_log ? ", debug log on" : "");
     } else {
         LOG_WARN("Could not read %s, using defaults", path.c_str());
     }

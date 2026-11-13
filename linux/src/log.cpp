@@ -1,5 +1,6 @@
 #include "log.hpp"
 
+#include <atomic>
 #include <cerrno>
 #include <cstdarg>
 #include <cstdio>
@@ -12,8 +13,19 @@ namespace {
 
 std::FILE* g_file = nullptr;
 std::mutex g_mutex;
+std::atomic<bool> g_debug{ false };
 
 }  // namespace
+
+void SetDebug(bool on)
+{
+    g_debug.store(on, std::memory_order_relaxed);
+}
+
+bool DebugEnabled()
+{
+    return g_debug.load(std::memory_order_relaxed);
+}
 
 void Open(const char* path, bool append)
 {

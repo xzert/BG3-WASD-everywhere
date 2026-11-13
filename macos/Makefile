@@ -1,7 +1,7 @@
 # Builds the macOS port of BG3 WASD Everywhere (Apple Silicon) and symtest, a host check of its
 # Mach-O, AArch64 and hotkey code. On Linux, only symtest is built.
 NAME := bg3-wasd-everywhere
-VERSION := 0.0.3-proto
+VERSION := 0.3.1
 BUILD := build
 LIBRARY := $(BUILD)/lib$(NAME).dylib
 # Copied once, so edits to it survive rebuilds.

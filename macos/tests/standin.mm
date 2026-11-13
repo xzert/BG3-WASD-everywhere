@@ -56,11 +56,18 @@ public:
 }  // namespace ecl
 
 namespace ls {
+// The game's event is at least 40 bytes; the click move cancel reads +0x10 and +0x1C.
 struct InputEvent {
     uint32_t id;
     uint32_t device;
     float value;
+    uint8_t pad0[4] = {};
+    uint8_t was_active = 0;  // +0x10
+    uint8_t pad1[11] = {};
+    uint8_t is_active = 0;  // +0x1C
+    uint8_t pad2[11] = {};
 };
+static_assert(sizeof(InputEvent) == 40);
 enum EInputPlayerIndex : int { Player1 = 0 };
 struct AnyView {
     int id;
@@ -146,6 +153,7 @@ public:
     uint16_t OnInputEvent(const ls::InputEvent& event);
 
     uint8_t bytes[0x30] = {};
+    int cancels = 0;  // ActionCancel releases
 };
 }  // namespace ecl
 
@@ -314,6 +322,9 @@ uint16_t ecl::InputController::OnInputEvent(const ls::InputEvent& event)
 {
     if (event.id == 4) {
         bytes[0x21] = 1;
+    }
+    if (event.id == 174 && event.was_active && !event.is_active) {
+        ++cancels;
     }
     return 0x101;
 }
@@ -770,6 +781,26 @@ int main(int argc, char** argv)
                 controller.bytes[0x21] != (active ? 0 : 1) || held != 0x101) {
                 std::printf("%s: edge panning %s, %d moves, held byte %d, results %u %#x\n", step,
                     edge ? "allowed" : "blocked", move_to.moves - moves, controller.bytes[0x21], moved, held);
+                ++failures;
+            }
+            // The first movement key down cancels a click move; a second one held with it doesn't.
+            auto key = [&](uint32_t id, bool down) {
+                ls::InputEvent event{ id, 0, down ? 1.0f : 0.0f };
+                event.was_active = down ? 0 : 1;
+                event.is_active = down ? 1 : 0;
+                return controller.OnInputEvent(event);
+            };
+            const int cancels = controller.cancels;
+            const uint16_t forward = key(157, true);  // CharacterMoveForward
+            key(101, true);                           // CameraLeft, with forward held
+            key(157, false);
+            key(101, false);
+            const int first = controller.cancels - cancels;
+            key(160, true);  // CharacterMoveRight, alone again
+            key(160, false);
+            if (forward != 0x101 || first != (active ? 1 : 0) || controller.cancels - cancels != (active ? 2 : 0)) {
+                std::printf("%s: movement keys sent %d click move cancels, %d of them for the first two keys\n",
+                    step, controller.cancels - cancels, first);
                 ++failures;
             }
         };

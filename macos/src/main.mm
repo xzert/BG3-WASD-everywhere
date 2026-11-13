@@ -53,6 +53,7 @@
 
 #include "arm64.hpp"
 #include "camera_tweaks.hpp"
+#include "move_cancel.hpp"
 #include "picking.hpp"
 #include "hotkeys.hpp"
 #include "inputconfig.hpp"
@@ -154,9 +155,11 @@ bool CharacterModeCameraActive() { return IsCharacterMode() && !g_in_combat.load
 bool InteractMovesBlocked() { return g_block_interact_move.load() && CharacterModeCameraActive(); }
 void LogCharacterModeCamera();
 
+// Whether a raw event may still go to the log: with DebugLog only, and a bounded number of them.
 bool TakeLine()
 {
-    return g_observed_lines.fetch_add(1, std::memory_order_relaxed) < kMaxObservedLines;
+    return wasd::log::DebugEnabled() &&
+        g_observed_lines.fetch_add(1, std::memory_order_relaxed) < kMaxObservedLines;
 }
 
 int64_t NowMs()
@@ -233,8 +236,10 @@ void LoadSettings(bool first)
 {
     ConfigChanged();  // the version read below, so the watch doesn't load it again
     Settings settings;
-    if (ParseSettingsFile(ConfigPath(), settings)) {
-        LOG_INFO("Config loaded from %s", ConfigPath().c_str());
+    const bool parsed = ParseSettingsFile(ConfigPath(), settings);
+    wasd::log::SetDebug(settings.debug_log);
+    if (parsed) {
+        LOG_INFO("Config loaded from %s%s", ConfigPath().c_str(), settings.debug_log ? ", debug log on" : "");
     } else {
         LOG_WARN("Could not read %s, using defaults", ConfigPath().c_str());
     }
@@ -371,7 +376,7 @@ bool InlineHook(const char* name, uintptr_t target, uintptr_t hook, void** origi
     if (!WriteCode(target, patch, sizeof patch)) {
         return false;
     }
-    LOG_INFO("Inline hook: %s at %#lx, trampoline %p", name, (unsigned long)target, memory);
+    LOG_DEBUG("Inline hook: %s at %#lx, trampoline %p", name, (unsigned long)target, memory);
     return true;
 }
 
@@ -477,7 +482,7 @@ bool TextInputFocused()
     static bool logged = false;
     if (focused != logged) {
         logged = focused;
-        LOG_INFO("%s", focused ? "Text field focused: key presses don't trigger hotkeys" : "Text field closed");
+        LOG_DEBUG("%s", focused ? "Text field focused: key presses don't trigger hotkeys" : "Text field closed");
     }
     return focused;
 }
@@ -757,9 +762,9 @@ void OnRotationStart()
         SetCursorDetached(true);
     }
     if (g_rotation.trigger.code == kSyntheticTrigger) {
-        LOG_INFO("Rotation start (mouselook), cursor %s", RotationCursorName(g_rotation.type));
+        LOG_DEBUG("Rotation start (mouselook), cursor %s", RotationCursorName(g_rotation.type));
     } else {
-        LOG_INFO("Rotation start (%s %d), cursor %s", g_rotation.trigger.mouse_button ? "mouse" : "key",
+        LOG_DEBUG("Rotation start (%s %d), cursor %s", g_rotation.trigger.mouse_button ? "mouse" : "key",
             g_rotation.trigger.code, RotationCursorName(g_rotation.type));
     }
 }
@@ -785,7 +790,7 @@ void EndRotation(const char* reason)
         cursor[1] = g_rotation.game_cursor[1];
     }
     g_rotation.active = false;
-    LOG_INFO("Rotation end: %s", reason);
+    LOG_DEBUG("Rotation end: %s", reason);
 }
 
 bool IsMouseMove(NSEventType type)
@@ -813,14 +818,14 @@ void OnRotationMouseMoved(NSEvent* event)
             [NSCursor hide];
             g_rotation.hidden = true;
         }
-        LOG_INFO("Rotation cursor hidden at %.0f,%.0f%s", g_rotation.cursor.x, g_rotation.cursor.y, front);
+        LOG_DEBUG("Rotation cursor hidden at %.0f,%.0f%s", g_rotation.cursor.x, g_rotation.cursor.y, front);
     } else {
         CGPoint center = g_rotation.cursor;
         if (GameInFront() && WindowCenter(center)) {
             WarpCursor(center);
             g_rotation.warped = true;
         }
-        LOG_INFO("Rotation cursor centered at %.0f,%.0f%s", center.x, center.y, front);
+        LOG_DEBUG("Rotation cursor centered at %.0f,%.0f%s", center.x, center.y, front);
     }
 }
 
@@ -851,7 +856,7 @@ bool OnLeftButton(id application, NSEvent* event, bool down)
             if (!g_autoforward) {
                 SendForwardKey(application, event, true);
             }
-            LOG_INFO("Rotate + left click: forward");
+            LOG_DEBUG("Rotate + left click: forward");
         }
         return true;
     }
@@ -1093,9 +1098,9 @@ void UpdateMouselook()
     const char* reason = g_mouselook ? MouselookPauseReason() : nullptr;
     if (reason != last_reason) {
         if (reason) {
-            LOG_INFO("Mouselook paused: %s", reason);
+            LOG_DEBUG("Mouselook paused: %s", reason);
         } else if (g_mouselook) {
-            LOG_INFO("Mouselook resumed");
+            LOG_DEBUG("Mouselook resumed");
             g_ticks_to_wait = kTicksBeforePress;
         }
         last_reason = reason;
@@ -1184,7 +1189,7 @@ GameMenuFn g_on_game_menu_changed = nullptr;
 void GameMenuHook(void* game_ui, int16_t player, bool open)
 {
     // Not seen in the first test: the Esc menu paused mouselook by the movement input alone.
-    LOG_INFO("Game menu %s (player %d)", open ? "opened" : "closed", int(player));
+    LOG_DEBUG("Game menu %s (player %d)", open ? "opened" : "closed", int(player));
     g_game_menu_open = open;
     g_on_game_menu_changed(game_ui, player, open);
 }
@@ -1321,12 +1326,12 @@ uint64_t IsFadingHook(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64
     const int state = (IsCharacterMode() ? 8 : 0) | (measured ? 4 : 0) | (skip ? 2 : 0) | int(result & 1);
     if (last_state.exchange(state) != state) {
         if (measured) {
-            LOG_INFO("Active character %s: the ray reaches the ground %.1f m behind it, limit %.1f "
+            LOG_DEBUG("Active character %s: the ray reaches the ground %.1f m behind it, limit %.1f "
                      "(camera %.1f m above the feet, camera root %.2f m above them)",
                 skip ? "skipped by picking" : "kept clickable", m.behind, limit, t_picking_ray.start[1] - m.feet,
                 m.offset);
         } else {
-            LOG_INFO("Picking asks about the active character in %s mode: %s",
+            LOG_DEBUG("Picking asks about the active character in %s mode: %s",
                 IsCharacterMode() ? "Character" : "Camera",
                 skip ? "skipped by the mod" : (result & 1) ? "the game says it fades out" : "clickable");
         }
@@ -1342,7 +1347,7 @@ uint64_t SelectedCharacterHook(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a
     if (a2) {
         const uint64_t character = *reinterpret_cast<const uint64_t*>(a2);
         if (g_active_character.exchange(character) != character) {
-            LOG_INFO("Active character %#llx (player %d)", (unsigned long long)character, int(int16_t(a1)));
+            LOG_DEBUG("Active character %#llx (player %d)", (unsigned long long)character, int(int16_t(a1)));
         }
     }
     return g_on_selected_character_changed(a0, a1, a2, a3, a4, a5, a6, a7);
@@ -1631,7 +1636,7 @@ bool EdgePanningHook(const void* camera_system, const void* view)
     const bool allowed = g_is_edge_panning_allowed(camera_system, view);
     static std::atomic<int> logged{ -1 };
     if (logged.exchange(allowed ? 1 : 0) != (allowed ? 1 : 0)) {
-        LOG_INFO("The game %s edge panning", allowed ? "allows" : "doesn't allow");
+        LOG_DEBUG("The game %s edge panning", allowed ? "allows" : "doesn't allow");
     }
     return allowed;
 }
@@ -1659,8 +1664,17 @@ uint64_t MoveToInputHook(void* task, const uint8_t* event)
     return g_move_to_input(task, event);
 }
 
+// Movement directions held, for move_cancel.hpp. The hook runs on the game thread only.
+uint8_t g_held_directions = 0;
+
 uint64_t InputControllerInputHook(void* controller, const uint8_t* event)
 {
+    if (event && wasd::move_cancel::FirstMovementPress(event, g_held_directions) && CharacterModeCameraActive()) {
+        alignas(8) uint8_t cancel[64] = {};
+        wasd::move_cancel::MakeCancelRelease(event, cancel);
+        g_input_controller_input(controller, cancel);
+        LOG_DEBUG("Movement key down: click move cancelled");
+    }
     const uint64_t result = g_input_controller_input(controller, event);
     if (IsInteract(event) && InteractMovesBlocked()) {
         static_cast<volatile uint8_t*>(controller)[0x21] = 0;  // not held
@@ -1705,8 +1719,9 @@ void InstallCombatAndCharacterCamera(const macho::Image& image, const uintptr_t*
             reinterpret_cast<uintptr_t>(&InputControllerInputHook), reinterpret_cast<void**>(&g_input_controller_input));
     if (g_interact_move_hooked) {
         LOG_INFO("BlockInteractMove: click and hold hooked, %s", g_block_interact_move ? "on" : "off in the config");
+        LOG_INFO("Movement keys cancel click moves");
     } else {
-        LOG_WARN("BlockInteractMove unavailable: the input hooks failed");
+        LOG_WARN("BlockInteractMove unavailable, movement keys don't cancel click moves: the input hooks failed");
     }
     LogCharacterModeCamera();
 }
@@ -1829,13 +1844,13 @@ void LogEvent(NSEvent* event)
     case NSEventTypeKeyDown:
     case NSEventTypeKeyUp:
         if (!event.isARepeat && TakeLine()) {
-            LOG_INFO("sendEvent: key %s, keyCode %u, modifiers %#lx", type == NSEventTypeKeyDown ? "down" : "up",
+            LOG_DEBUG("sendEvent: key %s, keyCode %u, modifiers %#lx", type == NSEventTypeKeyDown ? "down" : "up",
                 unsigned(event.keyCode), (unsigned long)event.modifierFlags);
         }
         break;
     case NSEventTypeFlagsChanged:
         if (TakeLine()) {
-            LOG_INFO("sendEvent: modifiers %#lx, keyCode %u", (unsigned long)event.modifierFlags,
+            LOG_DEBUG("sendEvent: modifiers %#lx, keyCode %u", (unsigned long)event.modifierFlags,
                 unsigned(event.keyCode));
         }
         break;
@@ -1983,11 +1998,11 @@ void LogProcess()
     char os[32] = "unknown";
     size_t os_size = sizeof os;
     sysctlbyname("kern.osproductversion", os, &os_size, nullptr, 0);
-    LOG_INFO("BG3 WASD Everywhere %s for macOS (prototype), pid %d, macOS %s, arm64", BG3WASD_VERSION, getpid(), os);
+    LOG_INFO("BG3 WASD Everywhere %s for macOS, pid %d, macOS %s, arm64", BG3WASD_VERSION, getpid(), os);
     char path[PATH_MAX];
     uint32_t path_size = sizeof path;
     if (_NSGetExecutablePath(path, &path_size) == 0) {
-        LOG_INFO("Executable: %s", path);
+        LOG_DEBUG("Executable: %s", path);
     }
     // macOS asks about privacy permissions on behalf of the responsible process: Steam, when the
     // launcher starts the game.
@@ -1997,7 +2012,7 @@ void LogProcess()
         const pid_t owner = responsible(getpid());
         char owner_name[256] = "?";
         proc_name(owner, owner_name, sizeof owner_name);
-        LOG_INFO("Responsible process: %d (%s)%s", int(owner), owner_name,
+        LOG_DEBUG("Responsible process: %d (%s)%s", int(owner), owner_name,
             owner == getpid() ? ", the game itself" : "");
     }
     NSBundle* bundle = NSBundle.mainBundle;
@@ -2030,7 +2045,7 @@ void Run()
     const size_t found = macho::FindSymbols(image, symbols::kNames, addresses, symbols::Count);
     LOG_INFO("Found %zu of %d symbols in %lld ms", found, int(symbols::Count), (long long)(NowMs() - start));
     for (int i = 0; i < symbols::Count; ++i) {
-        LOG_INFO("  %#lx (file %#lx) %s", (unsigned long)addresses[i],
+        LOG_DEBUG("  %#lx (file %#lx) %s", (unsigned long)addresses[i],
             addresses[i] ? (unsigned long)(addresses[i] - slide) : 0UL, symbols::kNames[i]);
     }
 
@@ -2123,7 +2138,7 @@ static const float* AdjustWalkableRayStart(const float* start, const float* end)
         } else if (result == wasd::picking::WalkableRay::NotTowardCharacter) {
             what = "kept: it doesn't head toward the character";
         }
-        LOG_INFO("Walkable ray %s", what);
+        LOG_DEBUG("Walkable ray %s", what);
     }
     const bool changed =
         result == wasd::picking::WalkableRay::Moved || result == wasd::picking::WalkableRay::Cancelled;
@@ -2163,7 +2178,7 @@ extern "C" const float* AdjustRayStart(const float* start, const float* end, uin
     static std::atomic<int> last_state{ -1 };
     const int state = !camera ? 0 : move ? 1 : 2;
     if (last_state.exchange(state) != state) {
-        LOG_INFO("Picking ray %s (zoom %.1f, pitch %.1f, ray %.1f)",
+        LOG_DEBUG("Picking ray %s (zoom %.1f, pitch %.1f, ray %.1f)",
             !camera ? "kept: no camera yet" : move ? "moved past camera occluders" : "kept: camera exception",
             zoom, pitch, length);
     }
@@ -2225,13 +2240,16 @@ extern "C" void ObserveCameraInput(void* self, const void* entity, const uint8_t
         const uint32_t none = 0;
         std::memcpy(const_cast<uint8_t*>(event), &none, sizeof none);
         static std::atomic<int> blocked{ 0 };
-        if (blocked.fetch_add(1) < 4) {
-            LOG_INFO("Camera movement action %u blocked in Character mode", action);
+        if (wasd::log::DebugEnabled() && blocked.fetch_add(1) < 4) {
+            LOG_DEBUG("Camera movement action %u blocked in Character mode", action);
         }
         return;
     }
 
-    // The rest of ls::InputEvent isn't known yet: the first few events of each id go to the log.
+    // With DebugLog, the first few events of each id go to the log.
+    if (!wasd::log::DebugEnabled()) {
+        return;
+    }
     struct Kind {
         uint32_t id;
         uint32_t count;
@@ -2242,7 +2260,7 @@ extern "C" void ObserveCameraInput(void* self, const void* entity, const uint8_t
     static uint64_t calls = 0;
     std::lock_guard lock(mutex);
     if (++calls == 1) {
-        LOG_INFO("CameraSystem::OnInputEvent: first call (this %p, entity %p)", self, entity);
+        LOG_DEBUG("CameraSystem::OnInputEvent: first call (this %p, entity %p)", self, entity);
     }
     Kind* kind = nullptr;
     for (size_t i = 0; i < kind_count; ++i) {
@@ -2266,5 +2284,5 @@ extern "C" void ObserveCameraInput(void* self, const void* entity, const uint8_t
     for (size_t i = 0; i < kBytes; ++i) {
         std::snprintf(hex + 3 * i, 4, "%02x ", event[i]);
     }
-    LOG_INFO("camera input #%llu, id %u #%u: %s", (unsigned long long)calls, action, kind->count, hex);
+    LOG_DEBUG("camera input #%llu, id %u #%u: %s", (unsigned long long)calls, action, kind->count, hex);
 }

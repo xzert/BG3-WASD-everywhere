@@ -90,6 +90,12 @@ an error and stays inactive.
     character's feet at that plane, the click is on the ground between them and is cancelled:
     started there, the ray would begin underground, and the game could pick a spot ahead of the
     character. The mod replaces the ray's `mov dword [rsp], 0x194280 ; call rax` with a stub.
+- A movement key stops a click move in Character mode outside combat, like
+  `HandleCharacterCommandCavehook` on Windows. When `ActionCancel` (input 174, the right button) is
+  released, `ecl::InputController::OnInputEvent` ends the running task or asks the server to stop
+  the character. The mod hooks that function at its entry and, when the first movement key goes
+  down, passes it such a release before the key's own event. With another movement key already
+  held, it sends nothing, so moving by WASD doesn't stutter.
 - `BlockInteractMove` (off by default, as on Windows): in Character mode outside combat, a click on
   the ground doesn't move the character, neither clicked nor held; objects and people still work.
   The function names come from the macOS build. In `ecl::CharacterTask_MoveTo::OnInputEvent`, the
@@ -193,7 +199,9 @@ The path must not contain spaces. Keeping `$LD_PRELOAD` keeps the Steam overlay 
 - **Config:** `bg3-wasd-everywhere.toml` next to `libbg3-wasd-everywhere.so`.
 - **Log:** `~/.local/state/bg3-wasd-everywhere/bg3-wasd-everywhere.log` (or
   `$XDG_STATE_HOME/bg3-wasd-everywhere/`). Inside the Steam container, the directory of an
-  `LD_PRELOAD` library is read-only, so the log cannot go next to it.
+  `LD_PRELOAD` library is read-only, so the log cannot go next to it. It has the startup, the
+  settings and mode changes. With `DebugLog = true` in the config, it also gets each decision of the
+  mod (clicks, camera rotation, the cursor, mouselook pauses), for bug reports.
 - **Rebuilding:** don't rebuild while the game is running.
 
 ## How it works

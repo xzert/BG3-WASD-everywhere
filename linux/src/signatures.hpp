@@ -119,6 +119,11 @@ struct InteractMoveAddresses {
     // mov [r14+0x1C], rcx` writes 0 to +0x1C and 0x100 to +0x20, where the byte +0x21 means "held".
     // The address of the immediate's bytes 5 and 6 (00 01), which become 00 00: no move while held.
     uintptr_t hold_move_flag = 0;
+    // The entry of InputController::OnInputEvent(this, const ls::InputEvent&), which the hold flag
+    // is in: `push rbp ; push r15 ; push r14 ; push r13 ; push r12 ; push rbx ; sub rsp, 0x28`
+    // (14 bytes). Hooked so a movement key cancels a click move (move_cancel.hpp). Optional: 0 if
+    // not found.
+    uintptr_t input_controller_entry = 0;
 };
 
 bool FindInteractMoveAddresses(const uint8_t* text, size_t size, uintptr_t text_address, InteractMoveAddresses& out,
