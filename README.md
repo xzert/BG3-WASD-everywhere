@@ -4,7 +4,7 @@
 
 If the Linux or macOS port is useful to you, you can support its development:
 
-- Boosty: TODO add link
+- [Boosty](https://boosty.to/xzert)
 - Tribute: TODO add link
 
 ## Thanks
